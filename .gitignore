@@ -1,0 +1,10 @@
+node_modules/
+target/
+coverage/
+*.log
+*.tgz
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
