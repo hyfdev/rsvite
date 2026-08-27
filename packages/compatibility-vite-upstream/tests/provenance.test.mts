@@ -32,8 +32,10 @@ import {
   htmlPreserveCommentsPackageManager,
   VITE_NODE_BUNDLE,
   wipeViteDist,
+  assertRsviteWorkspaceSubjectMatches,
   readCorpusManifest,
   readProvenance,
+  readRsviteWorkspaceSubject,
   validateCorpusManifestDocument,
   viteBaselineResultPath,
   vitestTestNamePattern,
@@ -145,6 +147,14 @@ test("the corpus manifest is accepted by the canonical validator", () => {
   assert.equal(asRecord(entry["source"])["repository"], VITE_UPSTREAM_REPOSITORY);
   assert.equal(asRecord(asRecord(entry["source"])["license"])["path"], "LICENSE");
   assert.equal(asRecord(asRecord(entry["lockfile"])["packageManager"])["version"], "10.34.5");
+  assert.equal(entry["javascriptApiLevel"], "C2");
+
+  const config = readFileSync(
+    join(testsDir, "../../../corpus/vite-upstream/playground/html/vite.config.js"),
+    "utf8",
+  );
+  assert.match(config, /name: 'pre-transform'/);
+  assert.match(config, /transformIndexHtml/);
 
   assert.equal(htmlPreserveCommentsAdapter.entryId, HTML_PRESERVE_COMMENTS_ENTRY_ID);
   assert.equal(htmlPreserveCommentsAdapter.spec, "playground/html/__tests__/html.spec.ts");
@@ -232,6 +242,8 @@ test("the committed Vite baseline is accepted with the corpus manifest", () => {
   );
   assert.equal(result["outcome"], "pass");
   assert.equal(asRecord(result["subject"])["name"], "vite");
+  assert.equal(result["javascriptApiLevel"], "C2");
+  assert.deepEqual(result["capabilityOwners"], [{ capability: "html", owner: "vite" }]);
   assert.equal(asRecord(result["manifestEntry"])["id"], HTML_PRESERVE_COMMENTS_ENTRY_ID);
   assert.equal(asRecord(result["manifestEntry"])["sourceCommit"], VITE_UPSTREAM_COMMIT);
   assert.deepEqual(result["explicitFallbacks"], []);
@@ -239,6 +251,11 @@ test("the committed Vite baseline is accepted with the corpus manifest", () => {
   assert.equal(asRecord(result["environment"])["arch"], "x64");
   assert.equal(asRecord(asRecord(result["environment"])["packageManager"])["name"], "pnpm");
   assert.equal(asRecord(asRecord(result["environment"])["packageManager"])["version"], "10.34.5");
+  assert.equal(asRecord(asRecord(result["environment"])["browser"])["name"], "chromium");
+  assert.match(
+    String(asRecord(asRecord(result["environment"])["browser"])["version"]),
+    /^\d+\.\d+\.\d+\.\d+$/,
+  );
   assertResultArtifactsExist(viteBaselineResultPath, result);
 });
 
@@ -270,6 +287,130 @@ function initTempGitRepo(): string {
   execFileSync("git", ["commit", "-m", "init"], { cwd: dir });
   return dir;
 }
+
+function initRsviteWorkspaceFixture(): string {
+  const dir = initTempGitRepo();
+  mkdirSync(join(dir, "packages/rsvite"), { recursive: true });
+  writeFileSync(
+    join(dir, "packages/rsvite/package.json"),
+    `${JSON.stringify({ name: "rsvite", version: "1.2.3" }, null, 2)}\n`,
+  );
+  execFileSync("git", ["add", "packages/rsvite/package.json"], { cwd: dir });
+  execFileSync("git", ["commit", "-m", "add rsvite package"], { cwd: dir });
+  return dir;
+}
+
+test("workspace subject identity comes from committed rsvite package metadata", () => {
+  const dir = initRsviteWorkspaceFixture();
+  try {
+    assert.deepEqual(readRsviteWorkspaceSubject(dir), {
+      name: "rsvite",
+      version: "1.2.3",
+      commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).trim(),
+    });
+
+    writeFileSync(join(dir, "packages/rsvite/new.rs"), "pub fn dirty() {}\n");
+    assert.throws(() => readRsviteWorkspaceSubject(dir), /must be committed before recording/);
+
+    rmSync(join(dir, "packages/rsvite/new.rs"));
+    writeFileSync(join(dir, "pnpm-workspace.yaml"), "packages: []\n");
+    assert.throws(() => readRsviteWorkspaceSubject(dir), /must be committed before recording/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the current workspace matches its recorded subject", () => {
+  const dir = initRsviteWorkspaceFixture();
+  try {
+    const subject = readRsviteWorkspaceSubject(dir);
+    assert.doesNotThrow(() => assertRsviteWorkspaceSubjectMatches(subject, dir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an unrelated documentation commit does not stale the recorded subject", () => {
+  const dir = initRsviteWorkspaceFixture();
+  try {
+    const subject = readRsviteWorkspaceSubject(dir);
+    writeFileSync(join(dir, "README.md"), "documentation\n");
+    execFileSync("git", ["add", "README.md"], { cwd: dir });
+    execFileSync("git", ["commit", "-m", "document fixture"], { cwd: dir });
+
+    assert.deepEqual(readRsviteWorkspaceSubject(dir), subject);
+    assert.doesNotThrow(() => assertRsviteWorkspaceSubjectMatches(subject, dir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a committed workspace build-input change stales the recorded subject", () => {
+  const dir = initRsviteWorkspaceFixture();
+  try {
+    const subject = readRsviteWorkspaceSubject(dir);
+    writeFileSync(join(dir, "pnpm-workspace.yaml"), "packages: []\n");
+    execFileSync("git", ["add", "pnpm-workspace.yaml"], { cwd: dir });
+    execFileSync("git", ["commit", "-m", "change workspace input"], { cwd: dir });
+
+    assert.throws(
+      () => assertRsviteWorkspaceSubjectMatches(subject, dir),
+      /product source differs from recorded subject commit/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a missing or unrelated recorded commit is rejected", () => {
+  const dir = initRsviteWorkspaceFixture();
+  try {
+    const subject = readRsviteWorkspaceSubject(dir);
+    assert.throws(
+      () => assertRsviteWorkspaceSubjectMatches({ ...subject, commit: "0".repeat(40) }, dir),
+      /subject commit does not exist in this checkout/,
+    );
+
+    const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], {
+      cwd: dir,
+      encoding: "utf8",
+    }).trim();
+    const unrelated = execFileSync("git", ["commit-tree", tree], {
+      cwd: dir,
+      encoding: "utf8",
+      input: "unrelated history\n",
+    }).trim();
+    assert.throws(
+      () => assertRsviteWorkspaceSubjectMatches({ ...subject, commit: unrelated }, dir),
+      /subject commit is not an ancestor of the current workspace/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("invalid or missing rsvite workspace metadata fails explicitly", () => {
+  const dir = initRsviteWorkspaceFixture();
+  const packagePath = join(dir, "packages/rsvite/package.json");
+  try {
+    rmSync(packagePath);
+    assert.throws(() => readRsviteWorkspaceSubject(dir), /cannot read rsvite workspace metadata/);
+
+    writeFileSync(packagePath, "not json\n");
+    assert.throws(() => readRsviteWorkspaceSubject(dir), /cannot read rsvite workspace metadata/);
+
+    writeFileSync(packagePath, `${JSON.stringify({ name: "other", version: "1.2.3" })}\n`);
+    assert.throws(() => readRsviteWorkspaceSubject(dir), /must declare package name rsvite/);
+
+    writeFileSync(packagePath, `${JSON.stringify({ name: "rsvite" })}\n`);
+    assert.throws(() => readRsviteWorkspaceSubject(dir), /non-empty string version/);
+
+    writeFileSync(packagePath, `${JSON.stringify({ name: "rsvite", version: 123 })}\n`);
+    assert.throws(() => readRsviteWorkspaceSubject(dir), /non-empty string version/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("a checkout with staged, unstaged, or untracked changes is not recorded as the pin", () => {
   const dir = initTempGitRepo();
@@ -341,7 +482,7 @@ test("the lockfile pnpm can be spawned while the parent session is another pnpm"
   } finally {
     process.env["PATH"] = previousPath;
   }
-});
+}, 20_000);
 
 test("skipping the vite build fails because the playground cannot load the node bundle", () => {
   const dir = mkdtempSync(join("/tmp", "rsvite-vite-bundle-"));

@@ -28,7 +28,25 @@ export default defineConfig({
         command: "vp lint --deny-warnings",
       },
       "check:rust": {
-        command: "cargo metadata --format-version 1 --no-deps",
+        command: "cargo clippy --workspace --all-targets --locked -- -D warnings",
+      },
+      "check:rust:format": {
+        command: "cargo fmt --all -- --check",
+      },
+      "build:rsvite:native": {
+        command:
+          "vp exec --filter rsvite -- napi build --manifest-path ../../crates/rsvite_binding/Cargo.toml --package-json-path package.json --output-dir . --platform --js native.js --dts native.d.ts --esm --release -- --locked",
+      },
+      "check:test:rsvite:core": {
+        command: "cargo test -p rsvite_core --locked",
+      },
+      "check:test:rsvite:package": {
+        command: "vp test --config packages/rsvite/vite.config.ts",
+        dependsOn: ["build:rsvite:native"],
+      },
+      "check:test:rsvite:upstream": {
+        command: "vp test --config packages/compatibility-vite-upstream/vite.rsvite.config.ts",
+        dependsOn: ["build:rsvite:native"],
       },
       "check:test:contract": {
         command: "vp test --config packages/compatibility-contract/vite.config.ts",
@@ -68,18 +86,34 @@ export default defineConfig({
           "node --experimental-strip-types packages/compatibility-drawdb/scripts/record-drawdb-baseline.mts",
         env: ["RUNNER_IMAGE"],
       },
+      "record:rsvite-upstream:baseline": {
+        command:
+          "node --experimental-strip-types packages/compatibility-vite-upstream/scripts/record-rsvite-pair.mts",
+        cache: false,
+      },
+      "test:m1:html": {
+        command: "echo M1 HTML checks passed",
+        dependsOn: [
+          "check:test:rsvite:core",
+          "check:test:rsvite:package",
+          "check:test:rsvite:upstream",
+          "check:test:vite-upstream",
+        ],
+      },
       ready: {
         command: "echo ready checks passed",
         dependsOn: [
           "check:format",
           "check:lint",
           "check:rust",
+          "check:rust:format",
           "check:test:contract",
           "check:test:runner",
           "check:test:vite-upstream",
           "check:test:actual-budget",
           "check:test:elk",
           "check:test:drawdb",
+          "test:m1:html",
         ],
       },
     },

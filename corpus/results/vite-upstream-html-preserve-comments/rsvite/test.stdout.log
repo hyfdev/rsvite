@@ -1,0 +1,73 @@
+
+ RUN  v4.1.11 /root/Documents/github-opensource/.worktrees/vite-ee644014-issue-4-fresh
+
+ ❯ playground/html/__tests__/html.spec.ts (62 tests | 1 failed | 61 skipped) 161ms
+     ↓ pre transform
+     ↓ string transform
+     ↓ tags transform
+     ↓ combined transform
+     ↓ server only transform
+     ↓ build only transform
+     ↓ conditional transform
+     ↓ body prepend/append transform
+     ↓ css
+     × preserve comments 24ms
+     ↓ external paths works with vite-ignore attribute
+     ↓ external paths by rolldownOptions.external works
+     ↓ pre transform
+     ↓ string transform
+     ↓ tags transform
+     ↓ combined transform
+     ↓ server only transform
+     ↓ build only transform
+     ↓ conditional transform
+     ↓ body prepend/append transform
+     ↓ css
+     ↓ relative path in html asset
+     ↓ pre transform
+     ↓ string transform
+     ↓ tags transform
+     ↓ combined transform
+     ↓ server only transform
+     ↓ build only transform
+     ↓ conditional transform
+     ↓ body prepend/append transform
+     ↓ css
+     ↓ relative path in html asset
+       ↓ script is async
+       ↓ script is mixed
+       ↓ zeroJS
+       ↓ is inlined
+       ↓ is not inlined
+       ↓ execution order when inlined
+       ↓ execution order when not inlined
+     ↓ noHead tags injection
+     ↓ noBody tags injection
+     ↓ direct access
+     ↓ spa fallback
+     ↓ separate links with different media props
+     ↓ should serve index.html via page navigation even when path matches file basename
+     ↓ should be 500 with overlay
+     ↓ should close overlay when clicked away
+     ↓ should close overlay when escape key is pressed
+     ↓ stack is updated
+     ↓ should reload when fixed
+     ↓ valid HTML is parsed
+     ↓ env works
+     ↓ importmap should be prepended
+     ↓ console.log is not tree-shaken
+     ↓ should fetch html proxy
+     ↓ passing relative path to rolldownOptions.input works
+     ↓ should warmup /warmup/warm.js
+   ↓ html serve behavior
+   ↓ html fallback works non browser accept header
+   ↓ escape html attribute
+   ↓ invalidate inline proxy module on reload
+   ↓ malformed URLs in src attributes should show errors
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 61 skipped (62)
+   Start at  06:40:16
+   Duration  465ms (transform 38ms, setup 0ms, import 225ms, tests 161ms, environment 0ms)
+
+{"numTotalTestSuites":22,"numPassedTestSuites":20,"numFailedTestSuites":2,"numPendingTestSuites":0,"numTotalTests":62,"numPassedTests":0,"numFailedTests":1,"numPendingTests":61,"numTodoTests":0,"snapshot":{"added":0,"failure":false,"filesAdded":0,"filesRemoved":0,"filesRemovedList":[],"filesUnmatched":0,"filesUpdated":0,"matched":0,"total":0,"unchecked":0,"uncheckedKeysByFile":[],"unmatched":0,"updated":0,"didUpdate":false},"startTime":1787870416785,"success":false,"testResults":[{"assertionResults":[{"ancestorTitles":["main"],"fullName":"main pre transform","status":"skipped","title":"pre transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["main"],"fullName":"main string transform","status":"skipped","title":"string transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["main"],"fullName":"main tags transform","status":"skipped","title":"tags transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["main"],"fullName":"main combined transform","status":"skipped","title":"combined transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["main"],"fullName":"main server only transform","status":"skipped","title":"server only transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["main"],"fullName":"main build only transform","status":"skipped","title":"build only transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["main"],"fullName":"main conditional transform","status":"skipped","title":"conditional transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["main"],"fullName":"main body prepend/append transform","status":"skipped","title":"body prepend/append transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["main"],"fullName":"main css","status":"skipped","title":"css","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["main"],"fullName":"main preserve comments","status":"failed","title":"preserve comments","duration":23.73634900000002,"failureMessages":["AssertionError: expected '<h1>Hello</h1>\\n<!-- comment two -->\\…' to match '<!-- comment one -->'\n    at /root/Documents/github-opensource/.worktrees/vite-ee644014-issue-4-fresh/playground/html/__tests__/html.spec.ts:101:18\n    at file:///root/Documents/github-opensource/.worktrees/vite-ee644014-issue-4-fresh/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"],"meta":{},"tags":[]},{"ancestorTitles":["main"],"fullName":"main external paths works with vite-ignore attribute","status":"skipped","title":"external paths works with vite-ignore attribute","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["main"],"fullName":"main external paths by rolldownOptions.external works","status":"skipped","title":"external paths by rolldownOptions.external works","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested"],"fullName":"nested pre transform","status":"skipped","title":"pre transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested"],"fullName":"nested string transform","status":"skipped","title":"string transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested"],"fullName":"nested tags transform","status":"skipped","title":"tags transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested"],"fullName":"nested combined transform","status":"skipped","title":"combined transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested"],"fullName":"nested server only transform","status":"skipped","title":"server only transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested"],"fullName":"nested build only transform","status":"skipped","title":"build only transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested"],"fullName":"nested conditional transform","status":"skipped","title":"conditional transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested"],"fullName":"nested body prepend/append transform","status":"skipped","title":"body prepend/append transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested"],"fullName":"nested css","status":"skipped","title":"css","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested"],"fullName":"nested relative path in html asset","status":"skipped","title":"relative path in html asset","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested w/ query"],"fullName":"nested w/ query pre transform","status":"skipped","title":"pre transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested w/ query"],"fullName":"nested w/ query string transform","status":"skipped","title":"string transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested w/ query"],"fullName":"nested w/ query tags transform","status":"skipped","title":"tags transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested w/ query"],"fullName":"nested w/ query combined transform","status":"skipped","title":"combined transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested w/ query"],"fullName":"nested w/ query server only transform","status":"skipped","title":"server only transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested w/ query"],"fullName":"nested w/ query build only transform","status":"skipped","title":"build only transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested w/ query"],"fullName":"nested w/ query conditional transform","status":"skipped","title":"conditional transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested w/ query"],"fullName":"nested w/ query body prepend/append transform","status":"skipped","title":"body prepend/append transform","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested w/ query"],"fullName":"nested w/ query css","status":"skipped","title":"css","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["nested w/ query"],"fullName":"nested w/ query relative path in html asset","status":"skipped","title":"relative path in html asset","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["build","scriptAsync"],"fullName":"build scriptAsync script is async","status":"skipped","title":"script is async","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["build","scriptMixed"],"fullName":"build scriptMixed script is mixed","status":"skipped","title":"script is mixed","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["build","zeroJS"],"fullName":"build zeroJS zeroJS","status":"skipped","title":"zeroJS","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["build","inline entry"],"fullName":"build inline entry is inlined","status":"skipped","title":"is inlined","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["build","inline entry"],"fullName":"build inline entry is not inlined","status":"skipped","title":"is not inlined","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["build","inline entry"],"fullName":"build inline entry execution order when inlined","status":"skipped","title":"execution order when inlined","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["build","inline entry"],"fullName":"build inline entry execution order when not inlined","status":"skipped","title":"execution order when not inlined","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["noHead"],"fullName":"noHead noHead tags injection","status":"skipped","title":"noHead tags injection","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["noBody"],"fullName":"noBody noBody tags injection","status":"skipped","title":"noBody tags injection","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["Unicode path"],"fullName":"Unicode path direct access","status":"skipped","title":"direct access","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["Unicode path"],"fullName":"Unicode path spa fallback","status":"skipped","title":"spa fallback","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["link with props"],"fullName":"link with props separate links with different media props","status":"skipped","title":"separate links with different media props","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["SPA fallback"],"fullName":"SPA fallback should serve index.html via page navigation even when path matches file basename","status":"skipped","title":"should serve index.html via page navigation even when path matches file basename","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["invalid"],"fullName":"invalid should be 500 with overlay","status":"skipped","title":"should be 500 with overlay","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["invalid"],"fullName":"invalid should close overlay when clicked away","status":"skipped","title":"should close overlay when clicked away","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["invalid"],"fullName":"invalid should close overlay when escape key is pressed","status":"skipped","title":"should close overlay when escape key is pressed","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["invalid"],"fullName":"invalid stack is updated","status":"skipped","title":"stack is updated","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["invalid"],"fullName":"invalid should reload when fixed","status":"skipped","title":"should reload when fixed","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["Valid HTML"],"fullName":"Valid HTML valid HTML is parsed","status":"skipped","title":"valid HTML is parsed","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["env"],"fullName":"env env works","status":"skipped","title":"env works","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["importmap"],"fullName":"importmap importmap should be prepended","status":"skipped","title":"importmap should be prepended","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["side-effects"],"fullName":"side-effects console.log is not tree-shaken","status":"skipped","title":"console.log is not tree-shaken","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["special character"],"fullName":"special character should fetch html proxy","status":"skipped","title":"should fetch html proxy","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["relative input"],"fullName":"relative input passing relative path to rolldownOptions.input works","status":"skipped","title":"passing relative path to rolldownOptions.input works","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":["warmup"],"fullName":"warmup should warmup /warmup/warm.js","status":"skipped","title":"should warmup /warmup/warm.js","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":[],"fullName":"html serve behavior","status":"skipped","title":"html serve behavior","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":[],"fullName":"html fallback works non browser accept header","status":"skipped","title":"html fallback works non browser accept header","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":[],"fullName":"escape html attribute","status":"skipped","title":"escape html attribute","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":[],"fullName":"invalidate inline proxy module on reload","status":"skipped","title":"invalidate inline proxy module on reload","failureMessages":[],"meta":{},"tags":[]},{"ancestorTitles":[],"fullName":"malformed URLs in src attributes should show errors","status":"skipped","title":"malformed URLs in src attributes should show errors","failureMessages":[],"meta":{},"tags":[]}],"startTime":1787870417198,"endTime":1787870417221.7363,"status":"failed","message":"","name":"/root/Documents/github-opensource/.worktrees/vite-ee644014-issue-4-fresh/playground/html/__tests__/html.spec.ts"}]}

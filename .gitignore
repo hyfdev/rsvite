@@ -5,6 +5,9 @@ coverage/
 !corpus/results/**/*.log
 *.tgz
 *.tsbuildinfo
+packages/rsvite/native.d.ts
+packages/rsvite/native.js
+packages/rsvite/*.node
 .DS_Store
 .env
 .env.*

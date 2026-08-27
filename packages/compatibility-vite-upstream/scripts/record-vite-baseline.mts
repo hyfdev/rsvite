@@ -14,14 +14,22 @@ import {
   htmlPreserveCommentsCommandExecutable,
   htmlPreserveCommentsPackageManager,
   preparePinnedViteCheckout,
+  publishViteUpstreamBrowserObservation,
+  readViteChromiumVersion,
   readCorpusManifest,
   viteBaselineDir,
 } from "../src/index.ts";
 
-const checkout = process.env["VITE_CHECKOUT"];
-if (checkout === undefined || checkout.length === 0) {
-  throw new Error("VITE_CHECKOUT must be the Vite repository pinned at the corpus commit");
+function required(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value.length === 0) {
+    throw new Error(`${name} must identify this recording's pinned input`);
+  }
+  return value;
 }
+
+const checkout = required("VITE_CHECKOUT");
+const runnerImage = required("RUNNER_IMAGE");
 
 const host = assertLinuxX64Host();
 const packageManager = htmlPreserveCommentsPackageManager();
@@ -38,6 +46,7 @@ assertPinnedCleanViteCheckout(checkout);
 ensureManifestPnpmOnPath(packageManager.version);
 const pnpmVersion = assertPnpmVersion(testExecutable, packageManager.version, { cwd: checkout });
 preparePinnedViteCheckout(checkout);
+const browserVersion = await readViteChromiumVersion(checkout);
 
 const packageJson = JSON.parse(
   readFileSync(join(checkout, "packages/vite/package.json"), "utf8"),
@@ -61,14 +70,15 @@ const report = await runCompatibilityCheck({
   environment: {
     os: host.os,
     arch: host.arch,
-    runnerImage: process.env["RUNNER_IMAGE"] ?? "local",
+    runnerImage,
     nodeVersion: process.version.slice(1),
     packageManager: { name: packageManager.name, version: pnpmVersion },
+    browser: { name: "chromium", version: browserVersion },
   },
   projectRoot: checkout,
   artifactRoot: viteBaselineDir,
   declared: {
-    javascriptApiLevel: "C0",
+    javascriptApiLevel: "C2",
     capabilityOwners: [{ capability: "html", owner: "vite" }],
     explicitFallbacks: [],
     classifyFailure: (failure) => ({
@@ -79,7 +89,7 @@ const report = await runCompatibilityCheck({
   timeouts: { installMs: 600_000, lifecycleMs: 900_000, browserMs: 60_000 },
 });
 
-const result = report.result as { outcome: string };
+const result = publishViteUpstreamBrowserObservation(report, manifest) as { outcome: string };
 if (result.outcome !== "pass") {
   throw new Error(`Vite baseline was ${result.outcome}: ${JSON.stringify(report.failure)}`);
 }

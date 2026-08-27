@@ -4,6 +4,7 @@ packages:
 catalogMode: prefer
 
 catalog:
+  "@napi-rs/cli": 3.8.2
   "@types/node": 22.20.0
   ajv: 8.20.0
   ajv-formats: 3.0.1

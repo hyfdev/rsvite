@@ -1,0 +1,29 @@
+{
+  "name": "rsvite",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A Rust-first Vite-compatible development tool.",
+  "bin": {
+    "rsvite": "./bin/rsvite.js"
+  },
+  "type": "module",
+  "exports": {},
+  "scripts": {
+    "check": "vp check",
+    "test": "vp test"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "catalog:",
+    "@types/node": "catalog:",
+    "playwright": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "napi": {
+    "binaryName": "rsvite"
+  },
+  "engines": {
+    "node": "^22.20.0 || >=24.11.0"
+  }
+}

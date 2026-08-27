@@ -22,6 +22,7 @@ test("a successful run emits a result the contract accepts with its manifest", a
 
   assert.equal(resultOf(report).outcome, "pass");
   assert.equal(report.failure, undefined);
+  assert.deepEqual(resultOf(report)["browserErrors"], []);
   const check = validators.validateResultAgainstManifest(manifest, report.result);
   assert.deepEqual(check.valid ? [] : check.violations, []);
   assert.ok(existsSync(report.logs.lifecycle.stdout), "the raw lifecycle output is preserved");

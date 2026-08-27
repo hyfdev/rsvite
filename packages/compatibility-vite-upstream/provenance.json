@@ -16,6 +16,11 @@
       "source": "playground/html/index.html",
       "dest": "playground/html/index.html",
       "sha256": "d5d60a54bf45c78e30f9c862c92cfd8ccfb8a808143b1747cb96eb713c103511"
+    },
+    {
+      "source": "playground/html/vite.config.js",
+      "dest": "playground/html/vite.config.js",
+      "sha256": "791319ff80c105d3c9e15295e78da441c958951de176c5496a4989adefedc548"
     }
   ],
   "exceptions": []
