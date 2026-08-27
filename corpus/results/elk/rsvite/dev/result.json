@@ -23,12 +23,12 @@
     }
   },
   "command": {
-    "argv": ["npx", "--no-install", "rsvite", ".", "--port", "40405"],
+    "argv": ["npx", "--no-install", "rsvite", ".", "--port", "45371"],
     "cwd": "/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7-rerecord",
     "exitCode": 1
   },
-  "startedAt": "2026-08-27T15:42:58.543Z",
-  "finishedAt": "2026-08-27T15:43:02.453Z",
+  "startedAt": "2026-08-27T16:08:05.645Z",
+  "finishedAt": "2026-08-27T16:08:10.634Z",
   "outcome": "fail",
   "javascriptApiLevel": "C0",
   "capabilityOwners": [

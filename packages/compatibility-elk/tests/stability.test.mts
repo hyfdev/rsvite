@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { BrowserAdapter, BrowserEvent, BrowserPage } from "@rsvite/compatibility-runner";
+import type { BrowserEvent, BrowserPage } from "@rsvite/compatibility-runner";
 import { test } from "vite-plus/test";
 import { createElkBrowserAdapter, waitForObservedStability } from "../src/index.ts";
 
@@ -79,7 +79,23 @@ test("a page that keeps reloading never counts as stable", async () => {
   );
 });
 
-test("the ELK adapter excludes cold events and still reports errors after stability", async () => {
+function elkAdapter(warmup: BrowserPage, acceptance: BrowserPage) {
+  let opens = 0;
+  return createElkBrowserAdapter({
+    inner: {
+      async open() {
+        opens += 1;
+        return opens === 1 ? warmup : acceptance;
+      },
+    },
+    pollMs: 0,
+    quietObservations: 2,
+    timeoutMs: 1_000,
+    sleep: abortableSleep,
+  });
+}
+
+test("an error the acceptance page emits on arrival is for the runner, not the cold record", async () => {
   const cold: BrowserEvent[] = [
     {
       type: "console-error",
@@ -87,24 +103,10 @@ test("the ELK adapter excludes cold events and still reports errors after stabil
         "Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep)",
     },
   ];
-  const after: BrowserEvent[] = [{ type: "page-error", message: "acceptance boom" }];
-  let opens = 0;
+  const arrival: BrowserEvent[] = [{ type: "page-error", message: "acceptance boom" }];
   const warmup = fakePage({ drains: [cold, [], []] });
-  const acceptance = fakePage({ drains: [[], []], extraAfter: after });
-  const inner: BrowserAdapter = {
-    async open() {
-      opens += 1;
-      return opens === 1 ? warmup : acceptance;
-    },
-  };
-
-  const adapter = createElkBrowserAdapter({
-    inner,
-    pollMs: 0,
-    quietObservations: 2,
-    timeoutMs: 1_000,
-    sleep: abortableSleep,
-  });
+  const acceptance = fakePage({ drains: [arrival] });
+  const adapter = elkAdapter(warmup, acceptance);
   const page = await adapter.open({
     url: "http://127.0.0.1/home",
     timeoutMs: 5_000,
@@ -112,11 +114,31 @@ test("the ELK adapter excludes cold events and still reports errors after stabil
   });
 
   const coldPhase = adapter.takeColdPhase();
-  assert.equal(opens, 2);
   assert.ok(coldPhase);
-  assert.equal(coldPhase.cacheState, "warm");
   assert.deepEqual(coldPhase.events, cold);
-  assert.deepEqual(page.drainEvents(), after);
+  assert.deepEqual(page.drainEvents(), arrival);
+});
+
+test("a main-frame navigation after the warm-up quiet streak stays on the acceptance page", async () => {
+  const cold: BrowserEvent[] = [
+    { type: "main-frame-navigated", url: "http://127.0.0.1/home?cold=1" },
+  ];
+  const later: BrowserEvent[] = [
+    { type: "main-frame-navigated", url: "http://127.0.0.1/home?reloaded=1" },
+  ];
+  const warmup = fakePage({ drains: [cold, [], []] });
+  const acceptance = fakePage({ drains: [later] });
+  const adapter = elkAdapter(warmup, acceptance);
+  const page = await adapter.open({
+    url: "http://127.0.0.1/home",
+    timeoutMs: 5_000,
+    signal: new AbortController().signal,
+  });
+
+  const coldPhase = adapter.takeColdPhase();
+  assert.ok(coldPhase);
+  assert.deepEqual(coldPhase.events, cold);
+  assert.deepEqual(page.drainEvents(), later);
 });
 
 test("deleting the quiet streak leaves cold errors on the page", async () => {

@@ -13,11 +13,7 @@ import {
   type RunEnvironment,
   type RunReport,
 } from "@rsvite/compatibility-runner";
-import {
-  chromiumVersion,
-  createChromiumBrowserAdapter,
-  discardMainFrameNavigations,
-} from "./chromium.ts";
+import { chromiumVersion, createChromiumBrowserAdapter } from "./chromium.ts";
 import {
   createElkManifest,
   declaredElkRun,
@@ -276,16 +272,13 @@ export function createElkBrowserAdapter(options: ElkBrowserAdapterOptions = {}):
         await warmup.close(request.signal);
 
         page = await inner.open(request);
+        coldPhase = { cacheState: "warm", events: warmupEvents };
         await waitForExpression(
           page,
           HOME_READY,
           request.signal,
           "the mocked /home timeline on the acceptance page",
         );
-        const settleEvents = await waitForObservedStability(page, request.signal, stability);
-        const coldEvents = [...warmupEvents, ...settleEvents];
-        coldPhase = { cacheState: "warm", events: coldEvents };
-
         await waitForExpression(page, CLICK_EXPLORE, request.signal, "the Explore control");
         await waitForExpression(page, EXPLORE_READY, request.signal, "the Explore page");
         await waitForExpression(page, CLICK_HOME, request.signal, "the Home control");
@@ -295,7 +288,6 @@ export function createElkBrowserAdapter(options: ElkBrowserAdapterOptions = {}):
           request.signal,
           "the mocked /home timeline after Explore",
         );
-        discardMainFrameNavigations(page);
         await page.evaluate(
           `${ELK_SENTINEL} = globalThis.crypto?.randomUUID?.() ?? String(Date.now())`,
           request.signal,
@@ -470,36 +462,40 @@ function runEnvironmentForLifecycle(
     });
     const browser = lifecycle === "build" ? undefined : createElkBrowserAdapter();
     const viteVersion = readInstalledVersion(projectRoot, "vite");
-    const report = await runCompatibilityCheck({
-      manifest,
-      entryId: ELK_ENTRY_ID,
-      lifecycle,
-      subject: {
-        name: subject,
-        version:
-          subject === "vite"
-            ? (viteVersion ?? readInstalledVersion(projectRoot, "vite") ?? "unknown")
-            : "workspace-unavailable",
-      },
-      environment,
-      projectRoot,
-      artifactRoot,
-      origin: lifecycle === "build" ? undefined : `http://127.0.0.1:${String(port)}`,
-      declared: declaredElkRun(subject, lifecycle),
-      ...(browser ? { browser } : {}),
-      ...(lifecycle === "dev" && subject === "vite"
-        ? {
-            update: (page: BrowserPage, signal: AbortSignal) =>
-              updateElk(page, signal, projectRoot),
-          }
-        : {}),
-      timeouts: {
-        installMs: INSTALL_TIMEOUT_MS,
-        lifecycleMs: LIFECYCLE_TIMEOUT_MS,
-        browserMs: BROWSER_TIMEOUT_MS,
-      },
-    });
-    await restoreElkStylesheet(projectRoot);
+    let report: RunReport;
+    try {
+      report = await runCompatibilityCheck({
+        manifest,
+        entryId: ELK_ENTRY_ID,
+        lifecycle,
+        subject: {
+          name: subject,
+          version:
+            subject === "vite"
+              ? (viteVersion ?? readInstalledVersion(projectRoot, "vite") ?? "unknown")
+              : "workspace-unavailable",
+        },
+        environment,
+        projectRoot,
+        artifactRoot,
+        origin: lifecycle === "build" ? undefined : `http://127.0.0.1:${String(port)}`,
+        declared: declaredElkRun(subject, lifecycle),
+        ...(browser ? { browser } : {}),
+        ...(lifecycle === "dev" && subject === "vite"
+          ? {
+              update: (page: BrowserPage, signal: AbortSignal) =>
+                updateElk(page, signal, projectRoot),
+            }
+          : {}),
+        timeouts: {
+          installMs: INSTALL_TIMEOUT_MS,
+          lifecycleMs: LIFECYCLE_TIMEOUT_MS,
+          browserMs: BROWSER_TIMEOUT_MS,
+        },
+      });
+    } finally {
+      await restoreElkStylesheet(projectRoot);
+    }
     const measuredVite = readInstalledVersion(projectRoot, "vite") ?? viteVersion;
     annotateElkResult(report, manifest, {
       ...(measuredVite !== undefined ? { viteVersion: measuredVite } : {}),

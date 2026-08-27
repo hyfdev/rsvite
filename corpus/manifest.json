@@ -21,11 +21,7 @@
       },
       "commands": {
         "install": {
-          "argv": [
-            "pnpm",
-            "install",
-            "--frozen-lockfile"
-          ]
+          "argv": ["pnpm", "install", "--frozen-lockfile"]
         },
         "test": {
           "argv": [
@@ -41,9 +37,7 @@
         "type": "process-exit",
         "timeoutMs": 900000
       },
-      "expectedCapabilities": [
-        "html"
-      ],
+      "expectedCapabilities": ["html"],
       "javascriptApiLevel": "C0",
       "notes": "Imported slice: playground/html/__tests__/html.spec.ts and playground/html/index.html, the fixture that holds the comments asserted by main > preserve comments.",
       "extensions": {
@@ -76,36 +70,20 @@
       },
       "commands": {
         "install": {
-          "argv": [
-            "corepack",
-            "yarn",
-            "install",
-            "--immutable"
-          ]
+          "argv": ["corepack", "yarn", "install", "--immutable"]
         },
         "dev": {
-          "argv": [
-            "corepack",
-            "yarn",
-            "start"
-          ],
+          "argv": ["corepack", "yarn", "start"],
           "env": {
             "BROWSER": "none",
             "PORT": "3001"
           }
         },
         "build": {
-          "argv": [
-            "corepack",
-            "yarn",
-            "build:browser"
-          ]
+          "argv": ["corepack", "yarn", "build:browser"]
         },
         "preview": {
-          "argv": [
-            "node",
-            "packages/desktop-client/bin/serve-build.mjs"
-          ],
+          "argv": ["node", "packages/desktop-client/bin/serve-build.mjs"],
           "env": {
             "BROWSER": "none",
             "PORT": "3001"
@@ -172,29 +150,16 @@
       },
       "commands": {
         "install": {
-          "argv": [
-            "pnpm",
-            "install",
-            "--frozen-lockfile"
-          ]
+          "argv": ["pnpm", "install", "--frozen-lockfile"]
         },
         "dev": {
-          "argv": [
-            "pnpm",
-            "dev:mocked"
-          ]
+          "argv": ["pnpm", "dev:mocked"]
         },
         "build": {
-          "argv": [
-            "pnpm",
-            "build"
-          ]
+          "argv": ["pnpm", "build"]
         },
         "preview": {
-          "argv": [
-            "pnpm",
-            "start"
-          ]
+          "argv": ["pnpm", "start"]
         }
       },
       "readiness": {
@@ -236,18 +201,8 @@
           "homePath": "/home",
           "exploreHint": "explore",
           "hmrStylesheet": "app/styles/global.css",
-          "nuxtHooks": [
-            "vite:extendConfig",
-            "nitro:config",
-            "prepare:types"
-          ],
-          "buildOutputs": [
-            "client",
-            "ssr",
-            "pwa",
-            "prerender",
-            "nitro"
-          ]
+          "nuxtHooks": ["vite:extendConfig", "nitro:config", "prepare:types"],
+          "buildOutputs": ["client", "ssr", "pwa", "prerender", "nitro"]
         }
       }
     }
