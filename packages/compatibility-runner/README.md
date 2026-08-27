@@ -60,6 +60,18 @@ filed as a slow start. Each HTTP probe carries its own deadline, because a serve
 connection and never answers would otherwise hold the probe past the readiness timeout it was
 supposed to enforce.
 
+Whether a command ended on its own or because the runner asked it to is decided from the
+kernel's record of the process, read before anything is signalled. The cheaper signals all
+fail somewhere: a close event may not have been delivered while the host was busy, an exited
+process that has not been reaped still accepts signals, and a command whose own handler turns
+a termination into `process.exit(0)` leaves no signal on its outcome at all.
+
+That record exists on Linux, the declared evidence environment. On other platforms the runner
+falls back to those weaker signals, and **that fallback is not reliable attribution** — an
+external termination the host was too busy to observe can be misread as a stop the runner
+requested. A result produced there should be treated as unattributed rather than as proof the
+command was still healthy.
+
 Stopping waits for the group to be gone, not for the leader to close. A descendant that ignores
 `SIGTERM`, or one that outlives a leader which exited on its own, is escalated to `SIGKILL` and
 waited for; the call does not return while any process of the group is alive.

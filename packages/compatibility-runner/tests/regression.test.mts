@@ -941,6 +941,8 @@ test("a server that turns an external SIGTERM into a clean exit still fails the 
   const port = await freePort();
   const request = await baseRequest("rsvite", { origin: `http://127.0.0.1:${String(port)}` });
   const pidFile = join(request.artifactRoot, "server.pid");
+  const marker = join(request.artifactRoot, "terminated");
+  let serverPid = 0;
   const manifest = structuredClone(syntheticManifest()) as {
     entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
   };
@@ -948,7 +950,12 @@ test("a server that turns an external SIGTERM into a clean exit still fails the 
   // the signal name alone cannot tell this apart from a stop the runner requested.
   manifest.entries[0]!.commands["dev"] = {
     argv: [process.execPath, fixture("serve.mjs")],
-    env: { PORT: String(port), OWN_PID_FILE: pidFile, EXIT_ON_SIGTERM: "0" },
+    env: {
+      PORT: String(port),
+      OWN_PID_FILE: pidFile,
+      EXIT_ON_SIGTERM: "0",
+      EXIT_MARKER: marker,
+    },
   };
 
   const report = await runCompatibilityCheck({
@@ -956,7 +963,8 @@ test("a server that turns an external SIGTERM into a clean exit still fails the 
     manifest,
     browser: {
       open: async () => {
-        process.kill(Number(readFileSync(pidFile, "utf8")), "SIGTERM");
+        serverPid = Number(readFileSync(pidFile, "utf8"));
+        process.kill(serverPid, "SIGTERM");
         await new Promise((resolve) => setTimeout(resolve, 250));
         return {
           evaluate: () => Promise.resolve(undefined),
@@ -969,6 +977,9 @@ test("a server that turns an external SIGTERM into a clean exit still fails the 
   const result = report.result as Record<string, unknown>;
   const failure = result["firstIncompatibleBehavior"] as { phase: string; message: string };
 
+  // The regression is only meaningful if the signal really landed and the server really left.
+  assert.equal(readFileSync(marker, "utf8"), "terminated", "the server never handled the signal");
+  assert.equal(await isAlive(serverPid), false, "the server was still running");
   assert.equal(result["outcome"], "fail", "an externally terminated server was recorded as a pass");
   assert.equal(failure.phase, "dev");
   assert.match(failure.message, /ended on its own during browser acceptance/);
@@ -978,12 +989,19 @@ test("an external termination is not hidden by a host that was too busy to notic
   const port = await freePort();
   const request = await baseRequest("rsvite", { origin: `http://127.0.0.1:${String(port)}` });
   const pidFile = join(request.artifactRoot, "server.pid");
+  const marker = join(request.artifactRoot, "terminated");
+  let serverPid = 0;
   const manifest = structuredClone(syntheticManifest()) as {
     entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
   };
   manifest.entries[0]!.commands["dev"] = {
     argv: [process.execPath, fixture("serve.mjs")],
-    env: { PORT: String(port), OWN_PID_FILE: pidFile, EXIT_ON_SIGTERM: "0" },
+    env: {
+      PORT: String(port),
+      OWN_PID_FILE: pidFile,
+      EXIT_ON_SIGTERM: "0",
+      EXIT_MARKER: marker,
+    },
   };
 
   const report = await runCompatibilityCheck({
@@ -991,7 +1009,8 @@ test("an external termination is not hidden by a host that was too busy to notic
     manifest,
     browser: {
       open: () => {
-        process.kill(Number(readFileSync(pidFile, "utf8")), "SIGTERM");
+        serverPid = Number(readFileSync(pidFile, "utf8"));
+        process.kill(serverPid, "SIGTERM");
         // Blocking the loop keeps the close event undelivered until after the stop begins, and
         // leaves the exited process a zombie — which still accepts signals. Neither the event
         // nor a successful signal can tell the runner what happened; the kernel's record can.
@@ -1010,6 +1029,9 @@ test("an external termination is not hidden by a host that was too busy to notic
   const result = report.result as Record<string, unknown>;
   const failure = result["firstIncompatibleBehavior"] as { phase: string; message: string };
 
+  // The regression is only meaningful if the signal really landed and the server really left.
+  assert.equal(readFileSync(marker, "utf8"), "terminated", "the server never handled the signal");
+  assert.equal(await isAlive(serverPid), false, "the server was still running");
   assert.equal(result["outcome"], "fail", "an externally terminated server was recorded as a pass");
   assert.equal(failure.phase, "dev");
   assert.match(failure.message, /ended on its own/);

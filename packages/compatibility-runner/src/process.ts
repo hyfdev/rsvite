@@ -33,8 +33,12 @@ export interface StartedCommand {
    * Node's `close` event may not have been delivered while the host was busy, an exited process
    * that has not been reaped still accepts signals, and a command whose own handler turns a
    * termination into `process.exit(0)` leaves no signal on its outcome at all. The kernel's
-   * record of the process, read before anything is signalled, is what settles it; where that
-   * record is unavailable the remaining evidence is used and ambiguity is not read as consent.
+   * record of the process, read before anything is signalled, is what settles it.
+   *
+   * That record exists on Linux, which is the declared evidence environment. Elsewhere this
+   * falls back to the weaker evidence above, and that fallback is not reliable attribution: a
+   * termination the host was too busy to observe can still be misread as a stop this runner
+   * requested. Treat a non-Linux result as unattributed rather than as confirmation.
    */
   exitedOnItsOwn(): boolean;
   /** The reason the command never started, if that is what happened. */
@@ -64,7 +68,8 @@ process.once("exit", () => {
  * What the kernel says about a process, independently of what this host has observed. A
  * process that exited while the host was busy is a zombie until it is reaped: its close event
  * has not been delivered, and it still accepts signals, so neither of those can tell us it is
- * over. Outside Linux there is no such record and the caller falls back to the other rules.
+ * over. Outside Linux there is no such record; the caller then has only the weaker evidence,
+ * which can miss an external termination entirely.
  */
 function livenessOf(pid: number | undefined): "running" | "ended" | "unknown" {
   if (pid === undefined) return "unknown";

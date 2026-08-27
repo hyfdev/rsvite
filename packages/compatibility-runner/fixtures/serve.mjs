@@ -10,7 +10,12 @@ const childPidFile = process.env["CHILD_PID_FILE"];
 const ownPidFile = process.env["OWN_PID_FILE"];
 // Turns an external SIGTERM into an ordinary exit, so the outcome carries no signal at all.
 if (process.env["EXIT_ON_SIGTERM"] !== undefined) {
-  process.on("SIGTERM", () => process.exit(Number(process.env["EXIT_ON_SIGTERM"])));
+  process.on("SIGTERM", () => {
+    // Proof that the signal was delivered and this handler ran, independent of the runner.
+    const marker = process.env["EXIT_MARKER"];
+    if (marker) writeFileSync(marker, "terminated");
+    process.exit(Number(process.env["EXIT_ON_SIGTERM"]));
+  });
 }
 
 if (ownPidFile) writeFileSync(ownPidFile, String(process.pid));
