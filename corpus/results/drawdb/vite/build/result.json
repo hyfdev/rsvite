@@ -1,0 +1,48 @@
+{
+  "contractVersion": 1,
+  "manifestEntry": {
+    "id": "drawdb",
+    "sourceCommit": "031aef1f1c1d3f9027ccfacbf084e9c1a31b8abc"
+  },
+  "subject": {
+    "name": "vite",
+    "version": "8.1.0"
+  },
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "runnerImage": "local",
+    "nodeVersion": "24.20.0",
+    "packageManager": {
+      "name": "npm",
+      "version": "11.19.0"
+    },
+    "browser": {
+      "name": "chromium",
+      "version": "151.0.7922.34"
+    }
+  },
+  "command": {
+    "argv": ["npm", "run", "build"],
+    "cwd": "/tmp/rsvite-drawdb-pU8ZSZ",
+    "exitCode": 0
+  },
+  "startedAt": "2026-08-27T18:52:53.727Z",
+  "finishedAt": "2026-08-27T18:53:02.037Z",
+  "outcome": "pass",
+  "javascriptApiLevel": "C2",
+  "capabilityOwners": [
+    {
+      "capability": "build-output",
+      "owner": "vite"
+    }
+  ],
+  "explicitFallbacks": [],
+  "browserErrors": [],
+  "artifactPaths": [
+    "install.stdout.log",
+    "install.stderr.log",
+    "build.stdout.log",
+    "build.stderr.log"
+  ]
+}

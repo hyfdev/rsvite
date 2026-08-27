@@ -205,6 +205,72 @@
           "buildOutputs": ["client", "ssr", "pwa", "prerender", "nitro"]
         }
       }
+    },
+    {
+      "id": "drawdb",
+      "kind": "real-project",
+      "source": {
+        "repository": "https://github.com/drawdb-io/drawdb",
+        "commit": "031aef1f1c1d3f9027ccfacbf084e9c1a31b8abc",
+        "license": {
+          "spdxId": "AGPL-3.0-only",
+          "path": "LICENSE"
+        }
+      },
+      "lockfile": {
+        "path": "package-lock.json",
+        "packageManager": {
+          "name": "npm",
+          "version": "11.19.0"
+        }
+      },
+      "commands": {
+        "install": {
+          "argv": ["npm", "ci"]
+        },
+        "dev": {
+          "argv": ["npm", "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173"]
+        },
+        "build": {
+          "argv": ["npm", "run", "build"]
+        },
+        "preview": {
+          "argv": ["npm", "run", "preview", "--", "--host", "127.0.0.1", "--port", "5173"]
+        }
+      },
+      "readiness": {
+        "type": "http-ready",
+        "urlPath": "/editor",
+        "expectStatus": 200,
+        "timeoutMs": 120000
+      },
+      "browserAcceptance": {
+        "entryPath": "/editor",
+        "mainFrameNavigationIsFailure": true,
+        "hmr": {
+          "sentinelExpression": "globalThis.__rsviteDrawDbHmrSentinel",
+          "sentinelStorage": "in-memory",
+          "edit": {
+            "path": "src/index.css",
+            "find": "@import \"tailwindcss\";",
+            "replace": "@import \"tailwindcss\";\n:root { --rsvite-drawdb-hmr-probe: active; }"
+          },
+          "expectedText": "Add table"
+        }
+      },
+      "expectedCapabilities": [
+        "html",
+        "modules-and-assets",
+        "resolution",
+        "errors",
+        "file-watching",
+        "hmr-without-full-reload",
+        "framework-lifecycle",
+        "build-output",
+        "preview-output"
+      ],
+      "javascriptApiLevel": "C2",
+      "notes": "Pinned DrawDB baseline. The source is checked out only in a disposable external location; the adapter owns Chromium interaction and HMR observation."
     }
   ]
 }

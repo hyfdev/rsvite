@@ -214,6 +214,9 @@ catalogs:
     ajv-formats:
       specifier: 3.0.1
       version: 3.0.1
+    npm:
+      specifier: 11.19.0
+      version: 11.19.0
     playwright:
       specifier: 1.62.1
       version: 1.62.1
@@ -300,6 +303,34 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.0
+      playwright:
+        specifier: 'catalog:'
+        version: 1.62.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite:
+        specifier: 'catalog:'
+        version: '@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2)'
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.2.8(@types/node@22.20.0)(@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2))(typescript@7.0.2)
+
+  packages/compatibility-drawdb:
+    dependencies:
+      '@rsvite/compatibility-contract':
+        specifier: workspace:*
+        version: link:../compatibility-contract
+      '@rsvite/compatibility-runner':
+        specifier: workspace:*
+        version: link:../compatibility-runner
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.0
+      npm:
+        specifier: 'catalog:'
+        version: 11.19.0
       playwright:
         specifier: 'catalog:'
         version: 1.62.1
@@ -1290,6 +1321,77 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
+  npm@11.19.0:
+    resolution: {integrity: sha512-SDd/hHg3KqHE5Ht2NHWxNYNtqCQ2pXAPLl6OtQhPyED5PHsRfrOtO199MZTIG2cQoQ1ZRI9t28shrD+2cr3AAw==}
+    engines: {node: ^20.17.0 || >=22.9.0}
+    hasBin: true
+    bundledDependencies:
+      - '@isaacs/string-locale-compare'
+      - '@npmcli/arborist'
+      - '@npmcli/config'
+      - '@npmcli/fs'
+      - '@npmcli/map-workspaces'
+      - '@npmcli/metavuln-calculator'
+      - '@npmcli/package-json'
+      - '@npmcli/promise-spawn'
+      - '@npmcli/redact'
+      - '@npmcli/run-script'
+      - '@sigstore/tuf'
+      - abbrev
+      - archy
+      - cacache
+      - chalk
+      - ci-info
+      - fastest-levenshtein
+      - fs-minipass
+      - glob
+      - graceful-fs
+      - hosted-git-info
+      - ini
+      - init-package-json
+      - is-cidr
+      - json-parse-even-better-errors
+      - libnpmaccess
+      - libnpmdiff
+      - libnpmexec
+      - libnpmfund
+      - libnpmorg
+      - libnpmpack
+      - libnpmpublish
+      - libnpmsearch
+      - libnpmteam
+      - libnpmversion
+      - make-fetch-happen
+      - minimatch
+      - minipass
+      - minipass-pipeline
+      - ms
+      - node-gyp
+      - nopt
+      - npm-audit-report
+      - npm-install-checks
+      - npm-package-arg
+      - npm-pick-manifest
+      - npm-profile
+      - npm-registry-fetch
+      - npm-user-validate
+      - p-map
+      - pacote
+      - parse-conflict-json
+      - proc-log
+      - qrcode-terminal
+      - read
+      - semver
+      - spdx-expression-parse
+      - ssri
+      - supports-color
+      - tar
+      - text-table
+      - tiny-relative-date
+      - treeverse
+      - validate-npm-package-name
+      - which
+
   obug@2.1.4:
     resolution: {integrity: sha512-4a+OsYv9UktOJKE+l1A4OufDgdRF9PifWj+tJnHURo/P+WOxpG4GzUFL9qCalmWauao6ogiG+QvnCovwPoyAWA==}
     engines: {node: '>=12.20.0'}
@@ -2116,6 +2218,8 @@ snapshots:
   mrmime@2.0.1: {}
 
   nanoid@3.3.18: {}
+
+  npm@11.19.0: {}
 
   obug@2.1.4: {}
 
