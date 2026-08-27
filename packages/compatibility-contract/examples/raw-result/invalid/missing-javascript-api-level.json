@@ -26,5 +26,10 @@
   "finishedAt": "2026-08-27T09:01:00.000Z",
   "outcome": "pass",
   "explicitFallbacks": [],
-  "capabilityOwner": "rust"
+  "capabilityOwners": [
+    {
+      "capability": "html",
+      "owner": "rust"
+    }
+  ]
 }

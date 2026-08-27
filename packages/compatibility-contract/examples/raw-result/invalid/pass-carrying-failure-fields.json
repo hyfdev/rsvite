@@ -26,7 +26,7 @@
   },
   "startedAt": "2026-08-27T09:10:00.000Z",
   "finishedAt": "2026-08-27T09:12:03.000Z",
-  "outcome": "fail",
+  "outcome": "pass",
   "javascriptApiLevel": "C0",
   "firstIncompatibleBehavior": {
     "phase": "test",
@@ -40,14 +40,14 @@
   "capabilityOwners": [
     {
       "capability": "modules-and-assets",
-      "owner": "compatibility-javascript"
+      "owner": "rust"
     }
   ],
   "explicitFallbacks": [
     {
       "component": "vite-build-orchestration",
-      "capabilities": ["modules-and-assets"],
-      "reason": "Build output for this suite is still produced by Vite while the Rust build path is unimplemented."
+      "reason": "Build output for this suite is still produced by Vite while the Rust build path is unimplemented.",
+      "capabilities": ["modules-and-assets"]
     }
   ],
   "browserErrors": [

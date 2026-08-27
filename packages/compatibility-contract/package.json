@@ -11,6 +11,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./schemas/capability.v1.json": "./schemas/capability.v1.schema.json",
     "./schemas/corpus-manifest.v1.json": "./schemas/corpus-manifest.v1.schema.json",
     "./schemas/raw-result.v1.json": "./schemas/raw-result.v1.schema.json",
     "./package.json": "./package.json"

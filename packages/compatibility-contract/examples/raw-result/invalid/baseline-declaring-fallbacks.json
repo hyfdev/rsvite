@@ -53,7 +53,13 @@
       "owner": "vite"
     }
   ],
-  "explicitFallbacks": [],
+  "explicitFallbacks": [
+    {
+      "component": "vite-dev-server",
+      "capabilities": ["hmr-without-full-reload"],
+      "reason": "The baseline cannot fall back to itself."
+    }
+  ],
   "browserErrors": [],
   "measurements": {
     "wallClockMs": 72400,

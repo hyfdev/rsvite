@@ -26,6 +26,11 @@
   "finishedAt": "2026-08-27T09:01:00.000Z",
   "outcome": "pass",
   "javascriptApiLevel": "C0",
-  "capabilityOwner": "compatibility-javascript",
+  "capabilityOwners": [
+    {
+      "capability": "html",
+      "owner": "vite"
+    }
+  ],
   "explicitFallbacks": []
 }

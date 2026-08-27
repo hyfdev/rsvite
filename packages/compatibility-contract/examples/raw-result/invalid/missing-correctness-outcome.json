@@ -25,7 +25,12 @@
   "startedAt": "2026-08-27T09:00:00.000Z",
   "finishedAt": "2026-08-27T09:01:00.000Z",
   "javascriptApiLevel": "C0",
-  "capabilityOwner": "rust",
+  "capabilityOwners": [
+    {
+      "capability": "html",
+      "owner": "rust"
+    }
+  ],
   "explicitFallbacks": [],
   "measurements": {
     "wallClockMs": 60000,

@@ -12,7 +12,7 @@
     "os": "linux",
     "arch": "x64",
     "runnerImage": "ubuntu-24.04",
-    "nodeVersion": "24.20.0",
+    "nodeVersion": "24.20.0garbage",
     "packageManager": {
       "name": "npm",
       "version": "10.9.2"

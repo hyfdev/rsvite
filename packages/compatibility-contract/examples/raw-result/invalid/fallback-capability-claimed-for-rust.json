@@ -5,8 +5,8 @@
     "sourceCommit": "031aef1f1c1d3f9027ccfacbf084e9c1a31b8abc"
   },
   "subject": {
-    "name": "vite",
-    "version": "7.1.3"
+    "name": "rsvite",
+    "version": "0.0.0"
   },
   "environment": {
     "os": "linux",
@@ -34,26 +34,32 @@
   "capabilityOwners": [
     {
       "capability": "html",
-      "owner": "vite"
+      "owner": "rust"
     },
     {
       "capability": "modules-and-assets",
-      "owner": "vite"
+      "owner": "rust"
     },
     {
       "capability": "resolution",
-      "owner": "vite"
+      "owner": "rust"
     },
     {
       "capability": "file-watching",
-      "owner": "vite"
+      "owner": "rust"
     },
     {
       "capability": "hmr-without-full-reload",
-      "owner": "vite"
+      "owner": "rust"
     }
   ],
-  "explicitFallbacks": [],
+  "explicitFallbacks": [
+    {
+      "component": "vite-dev-server",
+      "capabilities": ["hmr-without-full-reload"],
+      "reason": "Updates are still delivered by Vite's dev server."
+    }
+  ],
   "browserErrors": [],
   "measurements": {
     "wallClockMs": 72400,

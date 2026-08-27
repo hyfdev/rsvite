@@ -15,7 +15,7 @@
     "finishedAt",
     "outcome",
     "javascriptApiLevel",
-    "capabilityOwner",
+    "capabilityOwners",
     "explicitFallbacks"
   ],
   "properties": {
@@ -56,9 +56,13 @@
     "failureClassification": {
       "$ref": "#/$defs/failureClassification"
     },
-    "capabilityOwner": {
-      "description": "Who executed the behavior under measurement. Required, because a result with unknown ownership cannot support a Rust-first claim.",
-      "enum": ["rust", "compatibility-javascript"]
+    "capabilityOwners": {
+      "description": "Who executed each capability this run measured. Required, because a result with unknown ownership cannot support a Rust-first claim, and a single owner for the whole run could not describe a level where some behavior is Rust-owned and some is compatibility JavaScript.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/capabilityOwnership"
+      }
     },
     "explicitFallbacks": {
       "description": "Every fallback the run relied on. An empty array asserts there were none; an undeclared fallback invalidates the result.",
@@ -108,6 +112,92 @@
           }
         },
         "required": ["firstIncompatibleBehavior", "failureClassification"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "pass"
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "description": "A passing run has no first incompatible behavior and nothing to classify. Carrying those fields would leave the correctness record contradicting itself.",
+        "properties": {
+          "firstIncompatibleBehavior": false,
+          "failureClassification": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subject": {
+            "properties": {
+              "name": {
+                "const": "vite"
+              }
+            },
+            "required": ["name"],
+            "type": "object"
+          }
+        },
+        "required": ["subject"]
+      },
+      "then": {
+        "properties": {
+          "capabilityOwners": {
+            "items": {
+              "properties": {
+                "owner": {
+                  "const": "vite"
+                }
+              },
+              "required": ["owner"],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "explicitFallbacks": {
+            "type": "array",
+            "maxItems": 0
+          }
+        },
+        "description": "The baseline is the original implementation, so it has nothing to fall back to. A baseline result that declares fallbacks is describing something other than Vite running the input."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subject": {
+            "properties": {
+              "name": {
+                "const": "rsvite"
+              }
+            },
+            "required": ["name"],
+            "type": "object"
+          }
+        },
+        "required": ["subject"]
+      },
+      "then": {
+        "properties": {
+          "capabilityOwners": {
+            "items": {
+              "properties": {
+                "owner": {
+                  "enum": ["rust", "compatibility-javascript"]
+                }
+              },
+              "required": ["owner"],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        }
       }
     }
   ],
@@ -168,7 +258,7 @@
         },
         "nodeVersion": {
           "type": "string",
-          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
         },
         "packageManager": {
           "type": "object",
@@ -180,7 +270,7 @@
             },
             "version": {
               "type": "string",
-              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
             }
           }
         },
@@ -264,7 +354,7 @@
     "explicitFallback": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["component", "reason"],
+      "required": ["component", "capabilities", "reason"],
       "properties": {
         "component": {
           "enum": [
@@ -274,6 +364,15 @@
             "vite-scheduler",
             "other"
           ]
+        },
+        "capabilities": {
+          "description": "Which measured capabilities this fallback carried. A fallback that names no capability could sit beside an all-Rust ownership record and still read as Rust-first.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "urn:rsvite:compatibility:capability:v1"
+          }
         },
         "reason": {
           "type": "string",
@@ -331,6 +430,20 @@
       },
       "additionalProperties": {
         "type": "object"
+      }
+    },
+    "capabilityOwnership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability", "owner"],
+      "properties": {
+        "capability": {
+          "$ref": "urn:rsvite:compatibility:capability:v1"
+        },
+        "owner": {
+          "description": "`vite` is the original implementation measured as the baseline. `rust` and `compatibility-javascript` describe rsvite only, so a baseline run cannot be filed as rsvite compatibility JavaScript.",
+          "enum": ["vite", "rust", "compatibility-javascript"]
+        }
       }
     }
   }

@@ -34,23 +34,23 @@
   "capabilityOwners": [
     {
       "capability": "html",
-      "owner": "vite"
+      "owner": "compatibility-javascript"
     },
     {
       "capability": "modules-and-assets",
-      "owner": "vite"
+      "owner": "compatibility-javascript"
     },
     {
       "capability": "resolution",
-      "owner": "vite"
+      "owner": "compatibility-javascript"
     },
     {
       "capability": "file-watching",
-      "owner": "vite"
+      "owner": "compatibility-javascript"
     },
     {
       "capability": "hmr-without-full-reload",
-      "owner": "vite"
+      "owner": "compatibility-javascript"
     }
   ],
   "explicitFallbacks": [],

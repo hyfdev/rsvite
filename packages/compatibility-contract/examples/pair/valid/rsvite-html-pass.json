@@ -1,0 +1,79 @@
+{
+  "manifest": {
+    "contractVersion": 1,
+    "entries": [
+      {
+        "id": "vite-upstream-html",
+        "kind": "vite-upstream-e2e",
+        "source": {
+          "repository": "https://github.com/vitejs/vite",
+          "commit": "ee644014aab61e546742b862a7d7b0d6c7d67a7b",
+          "license": {
+            "spdxId": "MIT",
+            "path": "LICENSE"
+          }
+        },
+        "lockfile": {
+          "path": "pnpm-lock.yaml",
+          "packageManager": {
+            "name": "pnpm",
+            "version": "11.20.0"
+          }
+        },
+        "commands": {
+          "install": {
+            "argv": ["pnpm", "install", "--frozen-lockfile"]
+          },
+          "test": {
+            "argv": ["pnpm", "test-serve", "playground/html"]
+          }
+        },
+        "readiness": {
+          "type": "process-exit",
+          "timeoutMs": 900000
+        },
+        "expectedCapabilities": ["html"],
+        "javascriptApiLevel": "C0",
+        "notes": "Illustrative entry. An input that only exercises HTML entry discovery and serving declares html alone, so an early result is not filed under a capability it never exercised."
+      }
+    ]
+  },
+  "result": {
+    "contractVersion": 1,
+    "manifestEntry": {
+      "id": "vite-upstream-html",
+      "sourceCommit": "ee644014aab61e546742b862a7d7b0d6c7d67a7b"
+    },
+    "subject": {
+      "name": "rsvite",
+      "version": "0.0.0"
+    },
+    "environment": {
+      "os": "linux",
+      "arch": "x64",
+      "runnerImage": "ubuntu-24.04",
+      "nodeVersion": "24.20.0",
+      "packageManager": {
+        "name": "pnpm",
+        "version": "11.20.0"
+      }
+    },
+    "command": {
+      "argv": ["pnpm", "test-serve", "playground/html"],
+      "cwd": "corpus/vite-upstream",
+      "exitCode": 0
+    },
+    "startedAt": "2026-08-27T10:00:00.000Z",
+    "finishedAt": "2026-08-27T10:01:30.000Z",
+    "outcome": "pass",
+    "javascriptApiLevel": "C0",
+    "capabilityOwners": [
+      {
+        "capability": "html",
+        "owner": "rust"
+      }
+    ],
+    "explicitFallbacks": [],
+    "browserErrors": []
+  }
+}

@@ -65,7 +65,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "$ref": "#/$defs/capability"
+            "$ref": "urn:rsvite:compatibility:capability:v1"
           }
         },
         "javascriptApiLevel": {
@@ -173,7 +173,7 @@
             },
             "version": {
               "type": "string",
-              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
             }
           }
         }
@@ -337,22 +337,6 @@
           "minLength": 1
         }
       }
-    },
-    "capability": {
-      "enum": [
-        "html",
-        "modules-and-assets",
-        "resolution",
-        "errors",
-        "file-watching",
-        "hmr-without-full-reload",
-        "build-output",
-        "preview-output",
-        "workers",
-        "ssr",
-        "framework-lifecycle"
-      ],
-      "description": "Observable product capabilities, named as the product capability record names them. `html` covers HTML entry discovery and serving, and HTML response behavior."
     },
     "javascriptApiLevel": {
       "description": "Declared JavaScript API level this entry is measured at.",

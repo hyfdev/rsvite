@@ -16,26 +16,38 @@
     "packageManager": {
       "name": "npm",
       "version": "10.9.2"
+    },
+    "browser": {
+      "name": "chromium",
+      "version": "152.0.7977.64"
     }
   },
   "command": {
-    "argv": ["npm", "run", "dev"],
+    "argv": ["npm", "run", "dev", "--", "--port", "5173"],
+    "cwd": "corpus/drawdb",
     "exitCode": 0
   },
   "startedAt": "2026-08-27T09:00:00.000Z",
-  "finishedAt": "2026-08-27T09:01:00.000Z",
+  "finishedAt": "2026-08-27T09:01:12.400Z",
   "outcome": "pass",
-  "javascriptApiLevel": "C0",
+  "javascriptApiLevel": "C1",
   "capabilityOwners": [
+    {
+      "capability": "html",
+      "owner": "vite"
+    },
     {
       "capability": "html",
       "owner": "vite"
     }
   ],
   "explicitFallbacks": [],
+  "browserErrors": [],
   "measurements": {
-    "wallClockMs": 60000,
-    "maxRssBytes": 400000000,
+    "wallClockMs": 72400,
+    "maxRssBytes": 512483328,
+    "cacheState": "cold",
     "runOrder": 1
-  }
+  },
+  "artifactPaths": ["logs/vite-dev.log"]
 }
