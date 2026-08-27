@@ -1,0 +1,14 @@
+
+> @vitejs/vite-monorepo@ test-serve /root/Documents/github-opensource/vite
+> vitest run -c vitest.config.e2e.ts playground/html --testNamePattern 'main preserve comments'
+
+
+ RUN  v4.1.11 /root/Documents/github-opensource/vite
+
+---------·----------------------------------------------------
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 61 skipped (62)
+   Start at  20:55:21
+   Duration  841ms (transform 32ms, setup 271ms, import 26ms, tests 235ms, environment 0ms)
+

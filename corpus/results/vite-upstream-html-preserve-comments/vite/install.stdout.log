@@ -1,0 +1,12 @@
+Scope: all 279 workspace projects
+Lockfile is up to date, resolution step is skipped
+Progress: resolved [96m1[39m, reused [96m0[39m, downloaded [96m0[39m, added [96m0[39m
+Packages: [32m+109[39m
+[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m
+Progress: resolved [96m109[39m, reused [96m109[39m, downloaded [96m0[39m, added [96m109[39m, done
+
+[36m.[39m [96mpostinstall[39m$ simple-git-hooks
+[36m.[39m [96mpostinstall[39m: [INFO] Successfully set the pre-commit with command: pnpm exec lint-staged --concurrent false
+[36m.[39m [96mpostinstall[39m: [INFO] Successfully set all git hooks
+[36m.[39m [96mpostinstall[39m: Done
+Done in 1s using pnpm v10.34.5
