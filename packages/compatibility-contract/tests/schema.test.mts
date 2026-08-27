@@ -192,6 +192,19 @@ test("pair validation reports a malformed document instead of its relationships"
   );
 });
 
+test("a run that failed at install still records what it set out to verify", () => {
+  const result = readExample("raw-result/valid/rsvite-install-failure.json") as {
+    firstIncompatibleBehavior: { phase: string };
+    capabilityOwners: unknown[];
+  };
+
+  // Ownership is the selected subset for the run, not the subset it reached, so a setup
+  // failure neither has to invent capabilities nor file itself as measuring nothing.
+  assert.equal(result.firstIncompatibleBehavior.phase, "install");
+  assert.ok(result.capabilityOwners.length > 0);
+  assertAccepted("rsvite-install-failure.json", validators.validateRawResult(result));
+});
+
 test("an unknown capability is refused on both sides of the contract", () => {
   const manifest = readExample("corpus-manifest/invalid/unknown-capability.json");
   const result = readExample("raw-result/invalid/unknown-capability-owner.json");

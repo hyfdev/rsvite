@@ -57,7 +57,7 @@
       "$ref": "#/$defs/failureClassification"
     },
     "capabilityOwners": {
-      "description": "Who executed each capability this run measured. Required, because a result with unknown ownership cannot support a Rust-first claim, and a single owner for the whole run could not describe a level where some behavior is Rust-owned and some is compatibility JavaScript.",
+      "description": "The capabilities this run set out to verify, each bound to the implementation that owns it. It is the subset selected for this run, not the subset the run managed to execute: a run whose install fails still records what it intended to verify, and `firstIncompatibleBehavior.phase` shows how far it got. A single owner for the whole run could not describe a level where some behavior is Rust-owned and some is compatibility JavaScript.",
       "type": "array",
       "minItems": 1,
       "items": {

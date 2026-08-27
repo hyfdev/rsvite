@@ -1,0 +1,35 @@
+{
+  "contractVersion": 1,
+  "manifestEntry": {
+    "id": "drawdb",
+    "sourceCommit": "031aef1f1c1d3f9027ccfacbf084e9c1a31b8abc"
+  },
+  "subject": { "name": "rsvite", "version": "0.0.0" },
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "runnerImage": "ubuntu-24.04",
+    "nodeVersion": "24.20.0",
+    "packageManager": { "name": "npm", "version": "10.9.2" }
+  },
+  "command": { "argv": ["npm", "ci"], "cwd": "corpus/drawdb", "exitCode": 1 },
+  "startedAt": "2026-08-27T11:00:00.000Z",
+  "finishedAt": "2026-08-27T11:00:42.000Z",
+  "outcome": "fail",
+  "javascriptApiLevel": "C0",
+  "firstIncompatibleBehavior": {
+    "phase": "install",
+    "message": "npm ci refused to install: the rsvite package declares no binding for linux-x64",
+    "evidencePath": "logs/npm-ci.log"
+  },
+  "failureClassification": {
+    "kind": "current-compatibility-requirement",
+    "evidence": "The same install succeeds against the Vite baseline in the paired run, so the failure is rsvite packaging rather than the project."
+  },
+  "capabilityOwners": [
+    { "capability": "html", "owner": "rust" },
+    { "capability": "modules-and-assets", "owner": "rust" }
+  ],
+  "explicitFallbacks": [],
+  "browserErrors": []
+}

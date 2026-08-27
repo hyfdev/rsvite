@@ -83,11 +83,17 @@ Between a manifest and a result:
 
 ## What one result does and does not claim
 
-A raw result covers one command run. An entry's `expectedCapabilities` is the target scope of the
-whole input, and a real project entry has several commands, so a result owns a subset of that
-scope rather than all of it: a passing `dev` run has not exercised the entry's build or preview
-capabilities, and demanding the full set would make it claim runs that never happened. Ownership
-must be non-empty and free of duplicates, and every capability in it must be declared by the entry.
+A raw result covers one install plus one selected lifecycle command. An entry's
+`expectedCapabilities` is the target scope of the whole input, and a real project entry has
+several commands, so a result names the subset that run set out to verify rather than the whole
+scope: a `dev` run was never going to exercise the entry's build or preview capabilities, and
+demanding the full set would make it claim runs that never happened.
+
+`capabilityOwners` is that selected subset, not the set the run managed to execute. A run whose
+install fails still records what it intended to verify, and `firstIncompatibleBehavior.phase` says
+how far it got — so a setup failure does not have to be filed as a capability that was never
+reached, and it does not have to be filed as nothing either. Ownership must be non-empty and free
+of duplicates, and every capability in it must be declared by the entry.
 
 Whether an entry is covered as a whole is therefore a question across results, not a property of
 any one of them, and it belongs to the runner and later aggregate validation.

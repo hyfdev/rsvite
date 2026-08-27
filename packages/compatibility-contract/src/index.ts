@@ -41,11 +41,12 @@ export interface ContractValidators {
    * for capabilities the entry never expected. This validates both shapes and then the
    * relationship, so no caller can reach the relational rules by accident or skip them.
    *
-   * One result covers one command run, while an entry's `expectedCapabilities` is the target
-   * scope of the whole input. A result therefore owns a subset, never necessarily all of it:
-   * a passing `dev` run has not exercised the entry's build or preview capabilities, and
-   * requiring the full set would make it claim runs that never happened. Whether the entry as
-   * a whole is covered is a question across results, for the runner to answer.
+   * One result covers one install plus one selected lifecycle command, while an entry's
+   * `expectedCapabilities` is the target scope of the whole input. A result therefore names
+   * the subset that run set out to verify, never necessarily all of it: a `dev` run was never
+   * going to exercise the entry's build or preview capabilities, and requiring the full set
+   * would make it claim runs that never happened. Whether the entry as a whole is covered is
+   * a question across results, for the runner to answer.
    */
   validateResultAgainstManifest(manifest: unknown, result: unknown): ValidationResult;
 }
