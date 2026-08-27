@@ -108,12 +108,12 @@ Processing completed.
 [31m@actual-app/core[39m [96mbuild[39m [37m[32m»[39m[37m skip - a3ebd45d726176058c67a5427af469e26548196d[39m
 [97m@actual-app/web[39m [96mbuild:browser[39m [37m[33m…[39m[37m queued[39m
 [97m@actual-app/web[39m [96mbuild:browser[39m [37m[32m➔[39m[37m start[39m
-[97m@actual-app/web[39m [96mbuild:browser[39m [37m[32m✓[39m[37m done - 17.55s[39m
+[97m@actual-app/web[39m [96mbuild:browser[39m [37m[32m✓[39m[37m done - 17.93s[39m
 [96m[39m
 [96mSummary[39m
 ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
-[97m@actual-app/web[39m [96mbuild:browser[39m [92msuccess, took 17.55s, queued for 0.00s[39m
+[97m@actual-app/web[39m [96mbuild:browser[39m [92msuccess, took 17.93s, queued for 0.00s[39m
 success: 1, skipped: 3, pending: 0, aborted: 0, failed: 0
-worker restarts: 0, max worker memory usage: 26.17 MB
+worker restarts: 0, max worker memory usage: 25.86 MB
 ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
-Took a total of 17.76s to complete. 
+Took a total of 18.15s to complete. 

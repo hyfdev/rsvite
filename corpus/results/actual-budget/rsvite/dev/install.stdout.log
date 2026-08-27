@@ -1,6 +1,6 @@
 [94m➤[39m YN0000: · [1mYarn 4.17.1[22m
 [94m➤[39m [90mYN0000[39m: ┌ Resolution step
-[94m➤[39m [90mYN0000[39m: └ Completed in 0s 284ms
+[94m➤[39m [90mYN0000[39m: └ Completed in 0s 269ms
 [94m➤[39m [90mYN0000[39m: ┌ Post-resolution validation
 [93m➤[39m ]8;;https://yarnpkg.com/advanced/error-codes#yn0060---incompatible_peer_dependencyYN0060]8;;: │ [91mreact[39m is listed by your project with version [96m19.2.7[39m ([96mpfeaecd[39m), which doesn't satisfy what [91m@react-spring/[39m[91mzdog[39m (via [91mreact-spring[39m) and other dependencies request ([91mbut they have non-overlapping ranges![39m).
 [93m➤[39m ]8;;https://yarnpkg.com/advanced/error-codes#yn0060---incompatible_peer_dependencyYN0060]8;;: │ [91mreact-dom[39m is listed by your project with version [96m19.2.7[39m ([96mp145d5f[39m), which doesn't satisfy what [91m@react-spring/[39m[91mzdog[39m (via [91mreact-spring[39m) and other dependencies request ([91mbut they have non-overlapping ranges![39m).
@@ -20,7 +20,7 @@
 [93m➤[39m ]8;;https://yarnpkg.com/advanced/error-codes#yn0086---explain_peer_dependencies_ctaYN0086]8;;: │ Some peer dependencies are incorrectly met by dependencies; run [96myarn explain peer-requirements[39m for details.
 [94m➤[39m [90mYN0000[39m: └ Completed
 [94m➤[39m [90mYN0000[39m: ┌ Fetch step
-[94m➤[39m [90mYN0000[39m: └ Completed in 0s 518ms
+[94m➤[39m [90mYN0000[39m: └ Completed in 0s 478ms
 [94m➤[39m [90mYN0000[39m: ┌ Link step
-[94m➤[39m [90mYN0000[39m: └ Completed in 2s 806ms
-[93m➤[39m YN0000: · Done with warnings in 3s 742ms
+[94m➤[39m [90mYN0000[39m: └ Completed in 2s 570ms
+[93m➤[39m YN0000: · Done with warnings in 3s 432ms

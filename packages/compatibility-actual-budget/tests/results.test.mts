@@ -4,19 +4,21 @@ import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vite-plus/test";
 import { createContractValidators } from "@rsvite/compatibility-contract";
-import { readPin } from "../src/index.ts";
+import { actualBudgetEntry, readPin } from "../src/index.ts";
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const pin = readPin();
 const manifest: unknown = JSON.parse(readFileSync(join(repoRoot, "corpus/manifest.json"), "utf8"));
 
-function committed(subject: string): { path: string; result: Record<string, unknown> } {
-  const path = join(repoRoot, "corpus/results", pin.entryId, subject, "result.json");
-  return { path, result: JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> };
+type Result = Record<string, unknown>;
+
+function committed(subject: string, lifecycle: string): { path: string; result: Result } {
+  const path = join(repoRoot, "corpus/results", pin.entryId, subject, lifecycle, "result.json");
+  return { path, result: JSON.parse(readFileSync(path, "utf8")) as Result };
 }
 
 /** Evidence paths are relative to the result file, and a path nothing is at is not evidence. */
-function assertEvidenceExists(path: string, result: Record<string, unknown>): void {
+function assertEvidenceExists(path: string, result: Result): void {
   const paths = result["artifactPaths"];
   assert.ok(Array.isArray(paths) && paths.length > 0, `${path} names no evidence`);
   for (const entry of paths) {
@@ -36,8 +38,22 @@ function assertAcceptedWithManifest(path: string, result: unknown): void {
   );
 }
 
-test("the committed Vite baseline is accepted with the corpus manifest", () => {
-  const { path, result } = committed("vite");
+function owners(result: Result): Record<string, string> {
+  const declared = result["capabilityOwners"] as { capability: string; owner: string }[];
+  return Object.fromEntries(declared.map((entry) => [entry.capability, entry.owner]));
+}
+
+test("the corpus entry is the one the pin generates, including what the build reads", () => {
+  const entries = (manifest as { entries: { id: string }[] }).entries;
+  assert.deepEqual(
+    entries.find((entry) => entry.id === pin.entryId),
+    actualBudgetEntry(pin),
+    "the committed entry has drifted away from the pin it is generated from",
+  );
+});
+
+test("the committed development baseline is accepted with the corpus manifest", () => {
+  const { path, result } = committed("vite", "dev");
   assertAcceptedWithManifest(path, result);
   assertEvidenceExists(path, result);
 
@@ -45,10 +61,11 @@ test("the committed Vite baseline is accepted with the corpus manifest", () => {
   assert.equal((result["subject"] as { name: string }).name, "vite");
   // The baseline is the original implementation, so it has nothing to fall back to.
   assert.deepEqual(result["explicitFallbacks"], []);
+  assert.equal(owners(result)["hmr-without-full-reload"], "vite");
 });
 
 test("the baseline records the browser that ran, not the library that launched it", () => {
-  const { result } = committed("vite");
+  const { result } = committed("vite", "dev");
   const browser = (result["environment"] as { browser?: { name: string; version: string } })
     .browser;
 
@@ -62,8 +79,29 @@ test("the baseline records the browser that ran, not the library that launched i
   );
 });
 
+test("the project's own acceptance is committed beside the development baseline", () => {
+  const { path } = committed("vite", "dev");
+  // Produced by the recorder rather than by the runner, so the result does not name it — but it
+  // is the evidence that the application worked against the server the update was measured on.
+  for (const log of ["upstream-e2e.stdout.log", "upstream-e2e.stderr.log"]) {
+    assert.ok(statSync(join(dirname(path), log)).isFile(), `${log} is missing`);
+  }
+});
+
+test("the required build capability is carried by a result, not by a loose log", () => {
+  const { path, result } = committed("vite", "build");
+  assertAcceptedWithManifest(path, result);
+  assertEvidenceExists(path, result);
+
+  assert.equal(result["outcome"], "pass");
+  assert.equal(owners(result)["build-output"], "vite");
+  // One result describes one lifecycle command; the entry's coverage is what the results
+  // establish together, so the development result must not claim this one's capability.
+  assert.equal(owners(committed("vite", "dev").result)["build-output"], undefined);
+});
+
 test("the committed rsvite result is accepted, and says where rsvite diverges first", () => {
-  const { path, result } = committed("rsvite");
+  const { path, result } = committed("rsvite", "dev");
   assertAcceptedWithManifest(path, result);
   assertEvidenceExists(path, result);
 
@@ -77,9 +115,13 @@ test("the committed rsvite result is accepted, and says where rsvite diverges fi
   );
 });
 
-test("both subjects were measured against the same pinned input", () => {
-  const entryOf = (subject: string): unknown => committed(subject).result["manifestEntry"];
-
-  assert.deepEqual(entryOf("rsvite"), entryOf("vite"));
-  assert.deepEqual(entryOf("vite"), { id: pin.entryId, sourceCommit: pin.commit });
+test("every result was measured against the same pinned input", () => {
+  const expected = { id: pin.entryId, sourceCommit: pin.commit };
+  for (const [subject, lifecycle] of [
+    ["vite", "dev"],
+    ["vite", "build"],
+    ["rsvite", "dev"],
+  ] as const) {
+    assert.deepEqual(committed(subject, lifecycle).result["manifestEntry"], expected);
+  }
 });

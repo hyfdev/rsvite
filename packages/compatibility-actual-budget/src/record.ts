@@ -12,34 +12,42 @@ import {
   type RunReport,
   type RunRequest,
 } from "@rsvite/compatibility-runner";
-import { assertPinnedCheckout, type Pin } from "./index.ts";
-import { runUpstreamOrThrow, type UpstreamStep } from "./upstream.ts";
 
 /**
- * The manifest one subject is measured under: the same entry, describing the same pinned input,
- * with the commands that subject is driven by. The entry records the project's own commands, so
- * running a different implementation means naming that implementation's commands here rather
- * than editing the corpus into something the project does not actually declare.
+ * The manifest one run is measured under: the same entry, describing the same pinned input, with
+ * the commands that subject is driven by and the way that lifecycle reports being ready.
+ *
+ * The entry records the project's own commands and how its server becomes reachable. Running a
+ * different implementation, or a lifecycle that finishes instead of serving, means naming that
+ * here rather than editing the corpus into something the project does not declare.
  */
-export function manifestForSubject(
+export function manifestForRun(
   manifest: unknown,
   entryId: string,
-  commands: Readonly<Record<string, CommandSpec>>,
+  overrides: {
+    readonly commands: Readonly<Record<string, CommandSpec>>;
+    readonly readiness?: unknown;
+  },
 ): unknown {
   const source = manifest as { entries: { id: string }[] };
   return {
     ...source,
     entries: source.entries.map((entry) =>
-      entry.id === entryId ? { ...entry, commands: { ...commands } } : entry,
+      entry.id === entryId
+        ? {
+            ...entry,
+            commands: { ...overrides.commands },
+            ...(overrides.readiness === undefined ? {} : { readiness: overrides.readiness }),
+          }
+        : entry,
     ),
   };
 }
 
 export interface RecordRequest {
   readonly checkoutRoot: string;
-  /** Already subject-specific: see `manifestForSubject`. */
+  /** Already specific to this run: see `manifestForRun`. */
   readonly manifest: unknown;
-  readonly pin: Pin;
   readonly entryId: string;
   readonly lifecycle: LifecycleName;
   readonly subject: RunRequest["subject"];
@@ -54,12 +62,13 @@ export interface RecordRequest {
   readonly browser?: BrowserAdapter;
   readonly update?: (page: BrowserPage, signal: AbortSignal) => Promise<void>;
   /**
-   * Upstream commands that must have succeeded before any result may be published. They run
-   * first: a build that is attempted after the result is written cannot fail it, so a broken
-   * build would leave evidence that reads as a pass.
+   * Everything this recording holds fixed: the pinned checkout, and any input that lives inside
+   * it but outside its history. Raises when one of them is not what the corpus records. It runs
+   * before anything starts and again after everything has finished, because a run can only be
+   * read as evidence about the pinned input if that is still what it was.
    */
-  readonly preconditions?: readonly UpstreamStep[];
-  /** Undoes whatever the run edited, before the checkout is verified again. */
+  readonly verifyInputs: () => void | Promise<void>;
+  /** Undoes whatever the run edited, before the inputs are verified again. */
   readonly restore?: () => Promise<void>;
   readonly signal?: AbortSignal;
   /** The check itself. Named so a caller can record what a different runner observed. */
@@ -84,9 +93,8 @@ export interface Recording {
 export async function record(request: RecordRequest): Promise<Recording> {
   const check = request.check ?? runCompatibilityCheck;
 
-  // The checkout is only evidence while it is the pinned one, and that has to hold before any
-  // command runs — afterwards there is no way to tell what the run observed.
-  assertPinnedCheckout(request.checkoutRoot, request.pin);
+  // Before any command runs: afterwards there is no way to tell what the run actually observed.
+  await request.verifyInputs();
 
   await rm(request.stagingRoot, { recursive: true, force: true });
   await mkdir(request.stagingRoot, { recursive: true });
@@ -94,10 +102,6 @@ export async function record(request: RecordRequest): Promise<Recording> {
   try {
     let report: RunReport;
     try {
-      for (const step of request.preconditions ?? []) {
-        await runUpstreamOrThrow(step, request.signal);
-      }
-
       report = await check({
         manifest: request.manifest,
         entryId: request.entryId,
@@ -118,8 +122,8 @@ export async function record(request: RecordRequest): Promise<Recording> {
 
     // After everything, not only after the one edit this adapter knows it made. The project's own
     // spec and build run arbitrary code in the checkout; undoing a known edit proves nothing about
-    // what else they left behind.
-    assertPinnedCheckout(request.checkoutRoot, request.pin);
+    // what else they left behind, or about an input that is not in the checkout's history at all.
+    await request.verifyInputs();
 
     await publish(request.stagingRoot, request.publishRoot);
 

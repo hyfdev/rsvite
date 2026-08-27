@@ -28,8 +28,8 @@
     "cwd": "/root/.slock/agents/51a222ec-bcd0-4f4b-b39e-0d43c4c72273/work/corpus/actual",
     "exitCode": null
   },
-  "startedAt": "2026-08-27T14:58:47.748Z",
-  "finishedAt": "2026-08-27T14:58:51.994Z",
+  "startedAt": "2026-08-27T15:37:59.698Z",
+  "finishedAt": "2026-08-27T15:38:03.596Z",
   "outcome": "fail",
   "javascriptApiLevel": "C0",
   "capabilityOwners": [

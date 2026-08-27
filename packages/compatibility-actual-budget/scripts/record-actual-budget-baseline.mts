@@ -1,4 +1,5 @@
-// Records the Actual Budget corpus evidence for both subjects against one pinned checkout.
+// Records the Actual Budget corpus evidence against one pinned checkout: the Vite baseline for
+// the lifecycles the entry requires, and what rsvite currently does with the same input.
 //
 // Inputs, all of which the recording declares rather than assumes:
 //   ACTUAL_BUDGET_CHECKOUT  required. A clean git checkout at the commit `pin.json` names.
@@ -11,23 +12,25 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RunEnvironment } from "@rsvite/compatibility-runner";
+import type { LifecycleName, RunEnvironment } from "@rsvite/compatibility-runner";
 import {
   actualBudgetCommands,
+  actualBudgetReadiness,
   devOrigin,
   readPin,
   rsviteCommands,
   rsviteDeclaration,
   upstreamE2eCommand,
   viteDeclaration,
-  type Pin,
 } from "../src/index.ts";
+import { assertPinnedInputs, prepareTranslations } from "../src/translations.ts";
 import { createPlaywrightBrowser, readBrowserVersion } from "../src/browser.ts";
-import { manifestForSubject, record, waitForText, type Recording } from "../src/record.ts";
+import { manifestForRun, record, waitForText, type Recording } from "../src/record.ts";
 import { runUpstreamOrThrow } from "../src/upstream.ts";
 
 const INSTALL_MS = 900_000;
 const BUILD_MS = 1_200_000;
+const DEV_MS = 1_800_000;
 const UPSTREAM_SPEC_MS = 900_000;
 const BROWSER_INSTALL_MS = 900_000;
 
@@ -48,6 +51,10 @@ function required(name: string): string {
   return value;
 }
 
+const verifyInputs = (): void => {
+  assertPinnedInputs(checkout, pin);
+};
+
 function environment(browser?: { name: string; version: string }): RunEnvironment {
   return {
     os: process.platform,
@@ -59,10 +66,10 @@ function environment(browser?: { name: string; version: string }): RunEnvironmen
   };
 }
 
-function roots(subject: string): { publishRoot: string; stagingRoot: string } {
+function roots(subject: string, lifecycle: LifecycleName) {
   return {
-    publishRoot: join(resultsRoot, subject),
-    stagingRoot: join(resultsRoot, `${subject}.recording`),
+    publishRoot: join(resultsRoot, subject, lifecycle),
+    stagingRoot: join(resultsRoot, subject, `${lifecycle}.recording`),
   };
 }
 
@@ -101,12 +108,14 @@ async function prepareBrowser(): Promise<string> {
   }
 }
 
-/** rsvite against the same input: the project's own commands, run by rsvite instead of Vite. */
-async function recordRsvite(): Promise<Recording> {
+/** rsvite against the same input: the project's own lifecycle, driven by rsvite instead of Vite. */
+async function recordRsviteDev(): Promise<Recording> {
   return record({
     checkoutRoot: checkout,
-    manifest: manifestForSubject(manifest, pin.entryId, rsviteCommands(repoRoot, pin)),
-    pin,
+    manifest: manifestForRun(manifest, pin.entryId, {
+      commands: rsviteCommands(repoRoot, pin),
+      readiness: actualBudgetReadiness("dev"),
+    }),
     entryId: pin.entryId,
     lifecycle: "dev",
     subject: { name: "rsvite", version: "0.0.0" },
@@ -114,53 +123,68 @@ async function recordRsvite(): Promise<Recording> {
     // happened.
     environment: environment(),
     declared: rsviteDeclaration(),
-    ...roots("rsvite"),
+    ...roots("rsvite", "dev"),
     origin: devOrigin(pin),
+    verifyInputs,
     timeouts: { installMs: INSTALL_MS, lifecycleMs: 300_000, browserMs: 60_000 },
   });
 }
 
-/** The Vite baseline: the project's own build, then its own spec, then one update. */
-async function recordVite(pinned: Pin, browserVersion: string): Promise<Recording> {
-  const { publishRoot, stagingRoot } = roots("vite");
-  const editPath = join(checkout, pinned.sentinelEditPath);
+/**
+ * The production build as its own recorded lifecycle rather than a step beside one. The entry
+ * requires `build-output`, and a raw log next to a development result cannot claim it: one result
+ * describes one lifecycle command, and the entry's coverage is what the results establish together.
+ */
+async function recordViteBuild(): Promise<Recording> {
+  return record({
+    checkoutRoot: checkout,
+    manifest: manifestForRun(manifest, pin.entryId, {
+      commands: actualBudgetCommands(pin),
+      readiness: actualBudgetReadiness("build"),
+    }),
+    entryId: pin.entryId,
+    lifecycle: "build",
+    subject: { name: "vite", version: viteVersion() },
+    environment: environment(),
+    declared: viteDeclaration("build"),
+    ...roots("vite", "build"),
+    verifyInputs,
+    // The project's own build prunes the languages it does not ship, which leaves the pinned
+    // translations checkout changed. The pin goes back before the inputs are verified.
+    restore: () => prepareTranslations(checkout, pin),
+    timeouts: { installMs: INSTALL_MS, lifecycleMs: BUILD_MS, browserMs: 60_000 },
+  });
+}
+
+/** The development baseline: the project's own server, its own spec against it, then one update. */
+async function recordViteDev(browserVersion: string): Promise<Recording> {
+  const { publishRoot, stagingRoot } = roots("vite", "dev");
+  const editPath = join(checkout, pin.sentinelEditPath);
   const original = readFileSync(editPath, "utf8");
-  const build = actualBudgetCommands(pinned)["build"];
-  if (build === undefined) throw new Error("the adapter names no build command for this project");
 
   return record({
     checkoutRoot: checkout,
-    manifest,
-    pin: pinned,
-    entryId: pinned.entryId,
+    manifest: manifestForRun(manifest, pin.entryId, {
+      commands: actualBudgetCommands(pin),
+      readiness: actualBudgetReadiness("dev"),
+    }),
+    entryId: pin.entryId,
     lifecycle: "dev",
     subject: { name: "vite", version: viteVersion() },
     environment: environment({ name: "chromium", version: browserVersion }),
-    declared: viteDeclaration(),
+    declared: viteDeclaration("dev"),
     publishRoot,
     stagingRoot,
-    origin: devOrigin(pinned),
+    origin: devOrigin(pin),
     browser: createPlaywrightBrowser(checkout),
-    // The project's own production build has to hold before any of this is evidence, so it runs
-    // before the result exists rather than after it has already been written.
-    preconditions: [
-      {
-        label: "the project's own browser build",
-        command: { ...build, cwd: checkout },
-        timeoutMs: BUILD_MS,
-        logs: {
-          stdout: join(stagingRoot, "upstream-build.stdout.log"),
-          stderr: join(stagingRoot, "upstream-build.stderr.log"),
-        },
-      },
-    ],
+    verifyInputs,
     update: async (page, signal) => {
       // The project's own acceptance first: an update measured against a server the application
       // never worked on would be measuring nothing.
       await runUpstreamOrThrow(
         {
           label: "the project's own onboarding spec",
-          command: { ...upstreamE2eCommand(devOrigin(pinned), pinned), cwd: checkout },
+          command: { ...upstreamE2eCommand(devOrigin(pin), pin), cwd: checkout },
           timeoutMs: UPSTREAM_SPEC_MS,
           logs: {
             stdout: join(stagingRoot, "upstream-e2e.stdout.log"),
@@ -171,29 +195,35 @@ async function recordVite(pinned: Pin, browserVersion: string): Promise<Recordin
       );
       // Then one source edit, which the development server is expected to patch into the running
       // document rather than replace it.
-      writeFileSync(
-        editPath,
-        original.replace(pinned.sentinelEdit.find, pinned.sentinelEdit.replace),
-      );
-      await waitForText(page, pinned.sentinelEdit.expectedText, signal);
+      writeFileSync(editPath, original.replace(pin.sentinelEdit.find, pin.sentinelEdit.replace));
+      await waitForText(page, pin.sentinelEdit.expectedText, signal);
     },
     restore: () => Promise.resolve(writeFileSync(editPath, original)),
-    timeouts: { installMs: INSTALL_MS, lifecycleMs: 1_800_000, browserMs: 600_000 },
+    timeouts: { installMs: INSTALL_MS, lifecycleMs: DEV_MS, browserMs: 600_000 },
   });
 }
 
 function viteVersion(): string {
-  const pkg = JSON.parse(
-    readFileSync(join(checkout, "node_modules/vite/package.json"), "utf8"),
-  ) as { version: string };
-  return pkg.version;
+  const path = join(checkout, "node_modules/vite/package.json");
+  try {
+    return (JSON.parse(readFileSync(path, "utf8")) as { version: string }).version;
+  } catch {
+    throw new Error(`install the checkout first: the resolved Vite version is read from ${path}`);
+  }
 }
+
+// The build reads a checkout that lives inside the project but outside its history. Putting the
+// pinned revision in place — and making the project's own `git pull` unable to move it — happens
+// before any run, so every recording below is about the same input.
+await prepareTranslations(checkout, pin);
 
 const recorded: Record<string, Recording> = {};
 if (subjects === "both" || subjects === "rsvite") {
-  recorded["rsvite"] = await recordRsvite();
+  recorded["rsvite:dev"] = await recordRsviteDev();
 }
 if (subjects === "both" || subjects === "vite") {
-  recorded["vite"] = await recordVite(pin, await prepareBrowser());
+  const browserVersion = await prepareBrowser();
+  recorded["vite:build"] = await recordViteBuild();
+  recorded["vite:dev"] = await recordViteDev(browserVersion);
 }
 console.log(JSON.stringify(recorded, null, 2));

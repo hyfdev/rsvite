@@ -8,10 +8,9 @@ rendering chunks...
 computing gzip size...
 [2mdist/[0m[36mplugin-sw.js  [0m[1;2m94.73 kB[0m[2m │ gzip: 23.51 kB[0m[2m │ map: 173.44 kB[0m
 
-[36mbuilt in 32ms.[39m
-[2m10:59:32 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m Re-optimizing dependencies because vite config has changed
+[36mbuilt in 28ms.[39m
 
-  [32m[1mVITE[22m v8.1.5[39m  [42m [1mbrowser[22m [49m  [2mready in [0m[1m199[22m[2m[0m ms[22m
+  [32m[1mVITE[22m v8.1.5[39m  [42m [1mbrowser[22m [49m  [2mready in [0m[1m183[22m[2m[0m ms[22m
 
   [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3001[22m/[39m
   [32m➜[39m  [1mNetwork[22m: [36mhttp://100.64.0.13:[1m3001[22m/[39m
@@ -22,10 +21,8 @@ watching for file changes...[39m
 build started...[39m
 [2Ktransforming...[32m✓[0m 2078 modules transformed.
 rendering chunks...
-[2m10:59:33 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [optimizer] scanning dependencies...
 computing gzip size...
 [2mlib-dist/browser/[0m[36mkcab.worker.dev.js  [0m[33;1m5,240.22 kB[0m[2m │ gzip: 984.32 kB[0m[2m │ map: 10,117.69 kB[0m
 
-[36mbuilt in 633ms.[39m
-[2m10:59:36 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [optimizer] bundling dependencies...
-[2m11:00:12 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/manager/WelcomeScreen.tsx[22m
+[36mbuilt in 676ms.[39m
+[2m11:39:13 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/manager/WelcomeScreen.tsx[22m

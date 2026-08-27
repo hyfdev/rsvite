@@ -1,0 +1,44 @@
+{
+  "contractVersion": 1,
+  "manifestEntry": {
+    "id": "actual-budget",
+    "sourceCommit": "766cc8a7244c35f575ecc33a7a718b060cb5d496"
+  },
+  "subject": {
+    "name": "vite",
+    "version": "8.1.5"
+  },
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "runnerImage": "local",
+    "nodeVersion": "24.20.0",
+    "packageManager": {
+      "name": "yarn",
+      "version": "4.17.1"
+    }
+  },
+  "command": {
+    "argv": ["corepack", "yarn", "build:browser"],
+    "cwd": "/root/.slock/agents/51a222ec-bcd0-4f4b-b39e-0d43c4c72273/work/corpus/actual",
+    "exitCode": 0
+  },
+  "startedAt": "2026-08-27T15:38:03.946Z",
+  "finishedAt": "2026-08-27T15:38:26.788Z",
+  "outcome": "pass",
+  "javascriptApiLevel": "C1",
+  "capabilityOwners": [
+    {
+      "capability": "build-output",
+      "owner": "vite"
+    }
+  ],
+  "explicitFallbacks": [],
+  "browserErrors": [],
+  "artifactPaths": [
+    "install.stdout.log",
+    "install.stderr.log",
+    "build.stdout.log",
+    "build.stderr.log"
+  ]
+}
