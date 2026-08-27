@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { test } from "vite-plus/test";
 import {
+  HTML_PRESERVE_COMMENTS_ENTRY_ID,
   VITE_UPSTREAM_COMMIT,
   VITE_UPSTREAM_REPOSITORY,
   checkImportedFileProvenance,
@@ -10,7 +9,6 @@ import {
   readCorpusManifest,
   readProvenance,
   validateCorpusManifestDocument,
-  vendorRoot,
 } from "../src/index.ts";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -48,7 +46,7 @@ test("an unrecorded edit to an imported file is rejected", () => {
   );
 });
 
-test("an extra vendored file without a provenance record is rejected", () => {
+test("a vendored path missing from the provenance file list is rejected", () => {
   const provenance = structuredClone(readProvenance()) as {
     files: { source: string; dest: string; sha256: string }[];
   };
@@ -110,25 +108,18 @@ test("the corpus manifest is accepted by the canonical validator", () => {
   );
 
   const entry = asRecord((asRecord(manifest)["entries"] as unknown[])[0]!);
-  assert.equal(entry["id"], htmlPreserveCommentsAdapter.entryId);
+  assert.equal(entry["id"], HTML_PRESERVE_COMMENTS_ENTRY_ID);
   assert.equal(entry["kind"], "vite-upstream-e2e");
   assert.equal(asRecord(entry["source"])["commit"], VITE_UPSTREAM_COMMIT);
   assert.equal(asRecord(entry["source"])["repository"], VITE_UPSTREAM_REPOSITORY);
   assert.equal(asRecord(asRecord(entry["source"])["license"])["path"], "LICENSE");
+  assert.deepEqual(asRecord(entry["commands"])["test"], {
+    argv: ["pnpm", "test-serve", "playground/html"],
+  });
+  assert.equal(asRecord(asRecord(entry["lockfile"])["packageManager"])["version"], "10.34.5");
 
-  const extension = asRecord(asRecord(entry["extensions"])["x-vite-upstream"]);
-  assert.equal(extension["testName"], htmlPreserveCommentsAdapter.testName);
-  assert.equal(extension["spec"], htmlPreserveCommentsAdapter.spec);
-  assert.equal(extension["importedRoot"], htmlPreserveCommentsAdapter.importedRoot);
-});
-
-test("the imported spec still names the selected case and the fixture still holds the comments", () => {
-  const spec = readFileSync(join(vendorRoot, htmlPreserveCommentsAdapter.spec), "utf8");
-  const fixture = readFileSync(join(vendorRoot, "playground/html/index.html"), "utf8");
-
-  assert.match(spec, /test\('preserve comments'/);
-  assert.match(spec, /<!-- comment one -->/);
-  assert.match(spec, /<!-- comment two -->/);
-  assert.match(fixture, /<!-- comment one -->/);
-  assert.match(fixture, /<!-- comment two -->/);
+  assert.equal(htmlPreserveCommentsAdapter.entryId, HTML_PRESERVE_COMMENTS_ENTRY_ID);
+  assert.equal(htmlPreserveCommentsAdapter.testName, "main > preserve comments");
+  assert.equal(htmlPreserveCommentsAdapter.spec, "playground/html/__tests__/html.spec.ts");
+  assert.equal(htmlPreserveCommentsAdapter.importedRoot, "playground/html");
 });

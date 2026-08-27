@@ -6,14 +6,7 @@ import { createContractValidators } from "@rsvite/compatibility-contract";
 
 export const VITE_UPSTREAM_REPOSITORY = "https://github.com/vitejs/vite";
 export const VITE_UPSTREAM_COMMIT = "ee644014aab61e546742b862a7d7b0d6c7d67a7b";
-
-/** Paths are relative to the vendored copy. Issue #10 starts rsvite against this imported root. */
-export const htmlPreserveCommentsAdapter = {
-  entryId: "vite-upstream-html-preserve-comments",
-  testName: "main > preserve comments",
-  spec: "playground/html/__tests__/html.spec.ts",
-  importedRoot: "playground/html",
-} as const;
+export const HTML_PRESERVE_COMMENTS_ENTRY_ID = "vite-upstream-html-preserve-comments";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = join(srcDir, "..");
@@ -147,6 +140,34 @@ export function readProvenance(): unknown {
 export function readCorpusManifest(): unknown {
   return JSON.parse(readFileSync(corpusManifestPath, "utf8")) as unknown;
 }
+
+function requiredString(value: unknown, path: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${path} is missing`);
+  }
+  return value;
+}
+
+/** Paths are relative to the vendored copy. */
+export function adapterEntryFromManifest(manifest: unknown = readCorpusManifest()) {
+  const entries = asRecord(manifest)?.["entries"];
+  if (!Array.isArray(entries)) throw new Error("the corpus manifest has no entries");
+  const entry = asRecord(
+    entries.find((candidate) => asRecord(candidate)?.["id"] === HTML_PRESERVE_COMMENTS_ENTRY_ID),
+  );
+  if (entry === undefined) {
+    throw new Error(`the corpus manifest has no entry ${HTML_PRESERVE_COMMENTS_ENTRY_ID}`);
+  }
+  const extension = asRecord(asRecord(entry["extensions"])?.["x-vite-upstream"]);
+  return {
+    entryId: HTML_PRESERVE_COMMENTS_ENTRY_ID,
+    testName: requiredString(extension?.["testName"], "x-vite-upstream.testName"),
+    spec: requiredString(extension?.["spec"], "x-vite-upstream.spec"),
+    importedRoot: requiredString(extension?.["importedRoot"], "x-vite-upstream.importedRoot"),
+  };
+}
+
+export const htmlPreserveCommentsAdapter = adapterEntryFromManifest();
 
 /**
  * Every imported file must match the recorded upstream digest, unless an exception names that

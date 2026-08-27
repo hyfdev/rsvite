@@ -16,7 +16,7 @@
         "path": "pnpm-lock.yaml",
         "packageManager": {
           "name": "pnpm",
-          "version": "11.20.0"
+          "version": "10.34.5"
         }
       },
       "commands": {
@@ -24,7 +24,7 @@
           "argv": ["pnpm", "install", "--frozen-lockfile"]
         },
         "test": {
-          "argv": ["pnpm", "exec", "vp", "run", "test:vite-upstream:html-preserve-comments"]
+          "argv": ["pnpm", "test-serve", "playground/html"]
         }
       },
       "readiness": {
@@ -33,7 +33,7 @@
       },
       "expectedCapabilities": ["html"],
       "javascriptApiLevel": "C0",
-      "notes": "Imported slice: playground/html/__tests__/html.spec.ts and playground/html/index.html, the fixture that holds the comments asserted by main > preserve comments. Adapter code stays outside the vendored files.",
+      "notes": "Imported slice: playground/html/__tests__/html.spec.ts and playground/html/index.html, the fixture that holds the comments asserted by main > preserve comments.",
       "extensions": {
         "x-vite-upstream": {
           "suite": "playground/html",
