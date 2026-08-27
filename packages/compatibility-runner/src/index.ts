@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { createContractValidators } from "@rsvite/compatibility-contract";
 import {
   judgeUpdateWindow,
@@ -10,10 +9,12 @@ import {
   type BrowserEvent,
   type BrowserPage,
 } from "./browser.ts";
+import { deadline, runUnder, type Bounded, type Deadline } from "./deadline.ts";
 import { runCommand, startCommand, type CommandSpec, type CommandOutcome } from "./process.ts";
 import { waitForReadiness, type ReadinessSpec } from "./readiness.ts";
 
 export * from "./browser.ts";
+export { AbandonedWorkError, type Bounded, type Deadline } from "./deadline.ts";
 export * from "./process.ts";
 export * from "./readiness.ts";
 export {
@@ -102,39 +103,10 @@ interface LogPaths {
   readonly stderr: string;
 }
 
-/** How long a timed-out step is given to settle after it is asked to stop. */
+/** How long an aborted step is given to settle, and how long page cleanup gets of its own. */
 const CLEANUP_GRACE_MS = 1_000;
 
-type Bounded<T> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly reason: string };
-
-/**
- * Runs work under a deadline the runner owns. Racing alone would only stop the waiting: the
- * adapter would keep driving a browser the run has already left behind. The work is therefore
- * given an `AbortSignal`, and on expiry it is asked to stop and given a bounded grace period to
- * settle before the runner moves on.
- */
-async function underDeadline<T>(
-  start: (signal: AbortSignal) => Promise<T>,
-  timeoutMs: number,
-  what: string,
-): Promise<Bounded<T>> {
-  const controller = new AbortController();
-  const work = start(controller.signal);
-  const settled = work.then(
-    (value) => ({ ok: true as const, value }),
-    (error: unknown) => ({ ok: false as const, reason: `${what} failed: ${String(error)}` }),
-  );
-
-  const expired = Symbol("expired");
-  const first = await Promise.race([settled, delay(timeoutMs, expired)]);
-  if (first !== expired) return first as Bounded<T>;
-
-  controller.abort(new Error(`${what} exceeded ${String(timeoutMs)}ms`));
-  await Promise.race([settled, delay(CLEANUP_GRACE_MS, undefined)]);
-  return { ok: false, reason: `${what} did not finish within ${String(timeoutMs)}ms` };
-}
+const HMR_CAPABILITY = "hmr-without-full-reload";
 
 interface ManifestEntry {
   readonly id: string;
@@ -228,23 +200,20 @@ export async function runCompatibilityCheck(request: RunRequest): Promise<RunRep
   }
 
   const started = startCommand(inProject(lifecycle, request.projectRoot), logs.lifecycle);
+  // One budget, starting at spawn, owning every step underneath it. Readiness and the browser
+  // derive from it rather than waiting independently, so a slow start cannot buy the browser
+  // more time than the caller allowed for the whole phase.
+  const lifecycleBound = deadline(request.timeouts.lifecycleMs);
   let events: BrowserEvent[] = [];
   let failure: RunFailure | undefined;
   let lifecycleOutcome: CommandOutcome;
 
   try {
-    // The budget starts at spawn and covers readiness and the browser phase together, so a
-    // slow start cannot buy the browser more time than the caller allowed for the whole thing.
-    const phase = await underDeadline(
-      () =>
-        lifecyclePhase(request, entry, started, (observed) => {
-          events = observed;
-        }),
-      request.timeouts.lifecycleMs,
-      `the ${request.lifecycle} phase`,
-    );
-    failure = phase.ok ? phase.value : { phase: request.lifecycle, message: phase.reason };
+    const observed = await lifecyclePhase(request, entry, started, lifecycleBound);
+    events = observed.events;
+    failure = observed.failure;
   } finally {
+    lifecycleBound.dispose();
     lifecycleOutcome = await started.stop();
   }
 
@@ -266,100 +235,207 @@ export async function runCompatibilityCheck(request: RunRequest): Promise<RunRep
   );
 }
 
+interface Observed {
+  readonly events: BrowserEvent[];
+  readonly failure?: RunFailure;
+}
+
 async function lifecyclePhase(
   request: RunRequest,
   entry: ManifestEntry,
   started: ReturnType<typeof startCommand>,
-  collect: (events: BrowserEvent[]) => void,
-): Promise<RunFailure | undefined> {
-  const readiness = await waitForReadiness(entry.readiness, started, request.origin);
-  if (!readiness.ready) {
-    return { phase: request.lifecycle, message: readiness.reason ?? "readiness was not reached" };
+  lifecycleBound: Deadline,
+): Promise<Observed> {
+  const readiness = await waitForReadiness(
+    entry.readiness,
+    started,
+    request.origin,
+    lifecycleBound.signal,
+  );
+  if (lifecycleBound.expired()) {
+    return {
+      events: [],
+      failure: {
+        phase: request.lifecycle,
+        message: `the ${request.lifecycle} phase did not finish within ${String(request.timeouts.lifecycleMs)}ms`,
+      },
+    };
   }
-  if (request.browser === undefined) return undefined;
+  if (!readiness.ready) {
+    return {
+      events: [],
+      failure: {
+        phase: request.lifecycle,
+        message: readiness.reason ?? "readiness was not reached",
+      },
+    };
+  }
 
-  const observed = await observeBrowser(request, entry);
-  collect(observed.events);
-  return observed.failure;
+  const hmrProblem = missingHmrEvidence(request, entry);
+  if (hmrProblem !== undefined) {
+    return { events: [], failure: { phase: "browser", message: hmrProblem } };
+  }
+  if (request.browser === undefined) return { events: [] };
+
+  const observed = await observeBrowser(request, entry, lifecycleBound);
+  if (observed.failure === undefined && lifecycleBound.expired()) {
+    return {
+      events: observed.events,
+      failure: {
+        phase: request.lifecycle,
+        message: `the ${request.lifecycle} phase did not finish within ${String(request.timeouts.lifecycleMs)}ms`,
+      },
+    };
+  }
+  return observed;
+}
+
+/**
+ * A run that claims HMR has to have looked. Skipping the browser, or reading a sentinel the page
+ * never set, produces the same "no navigation, nothing changed" shape as a genuine pass, so the
+ * inputs that make the claim checkable are required before the claim is allowed.
+ */
+function missingHmrEvidence(request: RunRequest, entry: ManifestEntry): string | undefined {
+  const claimsHmr = request.declared.capabilityOwners.some(
+    (owner) => owner.capability === HMR_CAPABILITY,
+  );
+  if (!claimsHmr) return undefined;
+
+  if (request.browser === undefined)
+    return `the run claims ${HMR_CAPABILITY} but no browser was given`;
+  if (request.origin === undefined)
+    return `the run claims ${HMR_CAPABILITY} but no origin was given`;
+  if (entry.browserAcceptance?.hmr === undefined) {
+    return `the run claims ${HMR_CAPABILITY} but the manifest entry declares no HMR acceptance`;
+  }
+  if (request.update === undefined) {
+    return `the run claims ${HMR_CAPABILITY} but no update was performed`;
+  }
+  return undefined;
 }
 
 async function observeBrowser(
   request: RunRequest,
   entry: ManifestEntry,
-): Promise<{ events: BrowserEvent[]; failure?: RunFailure }> {
+  lifecycleBound: Deadline,
+): Promise<Observed> {
   const acceptance = entry.browserAcceptance;
   const browser = request.browser;
   if (acceptance === undefined || browser === undefined || request.origin === undefined) {
     return { events: [] };
   }
 
-  const budget = request.timeouts.browserMs;
-  const url = new URL(acceptance.entryPath, request.origin).toString();
-  const opened = await underDeadline(
-    (signal) => browser.open({ url, timeoutMs: budget, signal }),
-    budget,
-    "opening the page",
+  const claimsHmr = request.declared.capabilityOwners.some(
+    (owner) => owner.capability === HMR_CAPABILITY,
   );
-  if (!opened.ok) return { events: [], failure: { phase: "browser", message: opened.reason } };
+  // One budget for the whole browser phase, never larger than what the lifecycle has left.
+  // Granting it per step is how four 180ms steps used to fit inside a 250ms allowance.
+  const browserBound = deadline(
+    Math.min(request.timeouts.browserMs, lifecycleBound.remaining()),
+    lifecycleBound.signal,
+  );
+  const url = new URL(acceptance.entryPath, request.origin).toString();
 
-  const page = opened.value;
-  const events: BrowserEvent[] = [];
   try {
-    const sentinelExpression = acceptance.hmr?.sentinelExpression;
-    const before = await readSentinel(page, sentinelExpression, budget);
-    if (!before.ok) return { events, failure: { phase: "browser", message: before.reason } };
-    events.push(...page.drainEvents());
+    const opened = await runUnder(
+      (signal) => browser.open({ url, timeoutMs: browserBound.remaining(), signal }),
+      browserBound,
+      "opening the page",
+      CLEANUP_GRACE_MS,
+    );
+    if (!opened.ok) return { events: [], failure: { phase: "browser", message: opened.reason } };
 
-    if (request.update !== undefined) {
-      const update = request.update;
-      const updated = await underDeadline((signal) => update(page, signal), budget, "the update");
-      if (!updated.ok) return { events, failure: { phase: "browser", message: updated.reason } };
+    const page = opened.value;
+    const events: BrowserEvent[] = [];
+    try {
+      const expression = acceptance.hmr?.sentinelExpression;
+      const before = await readSentinel(page, expression, browserBound);
+      if (!before.ok) return { events, failure: { phase: "browser", message: before.reason } };
+      events.push(...page.drainEvents());
 
-      const windowEvents = page.drainEvents();
-      events.push(...windowEvents);
-      const after = await readSentinel(page, sentinelExpression, budget);
-      if (!after.ok) return { events, failure: { phase: "browser", message: after.reason } };
-
-      const verdict = judgeUpdateWindow({
-        sentinelBefore: before.value,
-        sentinelAfter: after.value,
-        events: windowEvents,
-      });
-      if (verdict.fullReload) {
+      if (claimsHmr && before.value === undefined) {
         return {
           events,
-          failure: { phase: "browser", message: `the update was a full reload: ${verdict.reason}` },
+          failure: {
+            phase: "browser",
+            message: `the run claims ${HMR_CAPABILITY} but the page had no in-memory sentinel before the update`,
+          },
         };
       }
-    }
 
-    const observation = normalizeEvents(events);
-    const first = observation.errors[0];
-    if (first !== undefined) {
-      return { events, failure: { phase: "browser", message: `${first.type}: ${first.message}` } };
+      if (request.update !== undefined) {
+        const update = request.update;
+        const updated = await runUnder(
+          (signal) => update(page, signal),
+          browserBound,
+          "the update",
+          CLEANUP_GRACE_MS,
+        );
+        if (!updated.ok) return { events, failure: { phase: "browser", message: updated.reason } };
+
+        const windowEvents = page.drainEvents();
+        events.push(...windowEvents);
+        const after = await readSentinel(page, expression, browserBound);
+        if (!after.ok) return { events, failure: { phase: "browser", message: after.reason } };
+
+        const verdict = judgeUpdateWindow({
+          sentinelBefore: before.value,
+          sentinelAfter: after.value,
+          events: windowEvents,
+        });
+        if (verdict.fullReload) {
+          return {
+            events,
+            failure: {
+              phase: "browser",
+              message: `the update was a full reload: ${verdict.reason ?? "no reason given"}`,
+            },
+          };
+        }
+      }
+
+      const observation = normalizeEvents(events);
+      const first = observation.errors[0];
+      if (first !== undefined) {
+        return {
+          events,
+          failure: { phase: "browser", message: `${first.type}: ${first.message}` },
+        };
+      }
+      return { events };
+    } finally {
+      await closeQuietly(page);
     }
-    return { events };
   } finally {
-    await closeQuietly(page);
+    browserBound.dispose();
   }
 }
 
 async function readSentinel(
   page: BrowserPage,
   expression: string | undefined,
-  budget: number,
+  bound: Deadline,
 ): Promise<Bounded<unknown>> {
   if (expression === undefined) return { ok: true, value: undefined };
-  return underDeadline(
+  return runUnder(
     (signal) => page.evaluate(expression, signal),
-    budget,
+    bound,
     "reading the sentinel",
+    CLEANUP_GRACE_MS,
   );
 }
 
-/** Closing is best effort: a page that will not close must not mask the run's own outcome. */
+/**
+ * Cleanup gets its own deadline. Handing `close` the already-aborted operation signal would let
+ * an adapter reject immediately and skip the cleanup this call exists to perform.
+ */
 async function closeQuietly(page: BrowserPage): Promise<void> {
-  await underDeadline((signal) => page.close(signal), CLEANUP_GRACE_MS, "closing the page");
+  const cleanup = deadline(CLEANUP_GRACE_MS);
+  try {
+    await runUnder((signal) => page.close(signal), cleanup, "closing the page", CLEANUP_GRACE_MS);
+  } finally {
+    cleanup.dispose();
+  }
 }
 
 async function finish(
@@ -440,7 +516,8 @@ async function finish(
     );
   }
 
-  // Written only after the contract accepted it, so an invalid document never reaches disk.
+  // Written only after the contract accepted it, and only once every abandoned operation has
+  // settled: a result recorded while an adapter still runs would describe a run nobody stopped.
   const resultPath = join(request.artifactRoot, "result.json");
   await writeFile(resultPath, `${JSON.stringify(result, undefined, 2)}\n`, "utf8");
 

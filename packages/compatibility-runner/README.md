@@ -74,8 +74,10 @@ separating:
 - A normal exit of the host, including `process.exit`, still kills any group left running.
 - `SIGTERM` and `SIGINT` are catchable, but this runner deliberately does not catch them: exit
   handlers do not run for an uncaught signal, so a group would survive. Installing handlers would
-  change the signal semantics of whatever embeds the runner, so the embedder keeps that policy —
-  and can stop a run through the runner's own API instead.
+  change the signal semantics of whatever embeds the runner, so the embedder keeps that policy.
+  There is no request-scoped cancellation API today — `runCompatibilityCheck` takes no signal and
+  returns no cancel handle — so an embedder that needs to stop a run mid-flight has to handle the
+  signal itself. A supported cancellation API is future work.
 - `SIGKILL` cannot be caught by anything, so no process can clean up after it.
 
 ## Browser adapters

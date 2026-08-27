@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "vite-plus/test";
 import {
@@ -13,6 +15,15 @@ import { baseRequest, fixturesDir, freePort, syntheticManifest, withPort } from 
 
 function fixture(name: string): string {
   return join(fixturesDir, name);
+}
+
+/** An entry that declares the capability these probes claim, so the pair stays coherent. */
+function claimingHmr(manifest: unknown): unknown {
+  const document = structuredClone(manifest) as {
+    entries: { expectedCapabilities: string[] }[];
+  };
+  document.entries[0]!.expectedCapabilities = ["html", "hmr-without-full-reload"];
+  return document;
 }
 
 async function isAlive(pid: number): Promise<boolean> {
@@ -201,4 +212,155 @@ test("a successful run writes a result whose evidence resolves from its own dire
     assert.equal(isAbsolute(path), false, `${path} is absolute`);
     assert.ok(existsSync(join(request.artifactRoot, path)), `${path} does not exist`);
   }
+});
+
+test("the lifecycle deadline aborts an update that is still running", async () => {
+  const port = await freePort();
+  let updateSettled = false;
+  let updateAborted = false;
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser: createSyntheticBrowser({
+      documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
+    }),
+    // Honours the contract: settles only once the runner aborts it.
+    update: (_page, signal) =>
+      new Promise<void>((resolve) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            updateAborted = true;
+            updateSettled = true;
+            resolve();
+          },
+          { once: true },
+        );
+      }),
+    timeouts: { installMs: 10_000, lifecycleMs: 400, browserMs: 30_000 },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const result = report.result as Record<string, unknown>;
+
+  assert.equal(
+    result["outcome"],
+    "fail",
+    "a run whose update never finished was recorded as a pass",
+  );
+  assert.equal(updateAborted, true, "the lifecycle deadline did not reach the update");
+  assert.equal(updateSettled, true, "the result was written while the update was still running");
+});
+
+test("browser steps share one budget instead of each getting the whole one", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser: createSyntheticBrowser({
+      documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
+      stepDelayMs: 180,
+    }),
+    update: () => Promise.resolve(),
+    timeouts: { installMs: 10_000, lifecycleMs: 30_000, browserMs: 250 },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const failure = (report.result as Record<string, unknown>)["firstIncompatibleBehavior"] as {
+    phase: string;
+  };
+
+  // open plus two sentinel reads already exceed 250ms together, though none exceeds it alone.
+  assert.equal((report.result as Record<string, unknown>)["outcome"], "fail");
+  assert.equal(failure.phase, "browser");
+});
+
+test("an adapter that ignores its abort signal fails the run without writing a result", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser: createSyntheticBrowser({ ignoresAbort: "open" }),
+    timeouts: { installMs: 10_000, lifecycleMs: 30_000, browserMs: 200 },
+  });
+
+  await assert.rejects(
+    runCompatibilityCheck({ ...request, manifest: withPort(request.manifest, port) }),
+    /abort-settle contract/,
+  );
+  assert.equal(
+    existsSync(join(request.artifactRoot, "result.json")),
+    false,
+    "a result was written while the adapter was still running",
+  );
+});
+
+test("a run claiming HMR without a browser is a failure, not a pass", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", { origin: `http://127.0.0.1:${String(port)}` });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(claimingHmr(request.manifest), port),
+    declared: {
+      ...request.declared,
+      capabilityOwners: [{ capability: "hmr-without-full-reload", owner: "rust" }],
+    },
+  });
+  const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as { message: string };
+
+  assert.equal(result["outcome"], "fail", "an HMR claim passed without a browser ever opening");
+  assert.match(failure.message, /no browser was given/);
+});
+
+test("a run claiming HMR whose page never set a sentinel is a failure", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    // No document memory: the sentinel reads as undefined before and after, which used to look
+    // exactly like a sentinel that survived.
+    browser: createSyntheticBrowser(),
+    update: () => Promise.resolve(),
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(claimingHmr(request.manifest), port),
+    declared: {
+      ...request.declared,
+      capabilityOwners: [{ capability: "hmr-without-full-reload", owner: "rust" }],
+    },
+  });
+  const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as { message: string };
+
+  assert.equal(result["outcome"], "fail", "an uninitialized sentinel counted as preserved");
+  assert.match(failure.message, /no in-memory sentinel before the update/);
+});
+
+test("a completed run leaves no timer holding the host open", async () => {
+  const probe = fileURLToPath(new URL("./host-exit-probe.mts", import.meta.url));
+  const startedAt = Date.now();
+
+  const finished = await new Promise<{ code: number | null; stdout: string }>((resolve) => {
+    const child = spawn(process.execPath, ["--experimental-strip-types", probe], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
+    child.once("close", (code) => resolve({ code, stdout }));
+  });
+  const elapsed = Date.now() - startedAt;
+
+  assert.equal(finished.code, 0, "the probe did not finish cleanly");
+  assert.match(finished.stdout, /pass/);
+  // Budgets in the probe are 2,000 ms. A leftover timer would hold this host until one fires.
+  assert.ok(
+    elapsed < 1_800,
+    `the host stayed alive after its work finished (${String(elapsed)}ms)`,
+  );
 });

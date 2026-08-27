@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { once } from "node:events";
-import { setTimeout as delay } from "node:timers/promises";
+import { sleep, timer } from "./deadline.ts";
 
 /** A command exactly as the corpus manifest records it. */
 export interface CommandSpec {
@@ -62,7 +62,7 @@ async function waitForGroupToDisappear(pgid: number, timeoutMs: number): Promise
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!groupExists(pgid)) return true;
-    await delay(GROUP_POLL_INTERVAL_MS);
+    await sleep(GROUP_POLL_INTERVAL_MS);
   }
   return !groupExists(pgid);
 }
@@ -181,7 +181,15 @@ export async function runCommand(
   logPaths?: { stdout: string; stderr: string },
 ): Promise<CommandOutcome> {
   const started = startCommand(command, logPaths);
-  const finished = await Promise.race([started.exited.then(() => true), delay(timeoutMs, false)]);
+  // The losing side of this race must not keep a timer alive: a run that finished in 200ms
+  // would otherwise hold an idle host open until its unused timeout fired.
+  const expiry = timer(timeoutMs, false);
+  let finished: boolean;
+  try {
+    finished = await Promise.race([started.exited.then(() => true), expiry.promise]);
+  } finally {
+    expiry.cancel();
+  }
 
   const outcome = await started.stop();
   return finished ? outcome : { ...outcome, timedOut: true };

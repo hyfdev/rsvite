@@ -1,5 +1,16 @@
 import type { BrowserAdapter, BrowserEvent, BrowserPage } from "./browser.ts";
 
+/** Never settles at all, modelling an adapter that does not honour its abort signal. */
+function neverSettles(): Promise<never> {
+  return new Promise(() => undefined);
+}
+
+function paused(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 /** Settles only when the runner gives up, which is what the adapter contract demands. */
 function hangs(signal: AbortSignal, what: string): Promise<never> {
   return new Promise((_resolve, reject) => {
@@ -28,6 +39,10 @@ export interface SyntheticScript {
    * runner aborts, which is the behaviour the adapter contract requires.
    */
   readonly hangUntilAborted?: "open" | "evaluate";
+  /** Each asynchronous step takes this long, for exercising a cumulative budget. */
+  readonly stepDelayMs?: number;
+  /** Never settles, not even when aborted — an adapter that breaks the contract. */
+  readonly ignoresAbort?: "open" | "evaluate";
 }
 
 export interface SyntheticPage extends BrowserPage {
@@ -49,6 +64,7 @@ export function createSyntheticBrowser(script: SyntheticScript = {}): BrowserAda
         return Promise.reject(new Error(script.failToOpen));
       }
 
+      if (script.ignoresAbort === "open") return neverSettles();
       if (script.hangUntilAborted === "open") return hangs(request.signal, "open");
 
       let memory: Record<string, unknown> = { ...script.documentMemory };
@@ -56,12 +72,14 @@ export function createSyntheticBrowser(script: SyntheticScript = {}): BrowserAda
       let closed = false;
 
       const page: SyntheticPage = {
-        evaluate(expression, signal) {
-          if (closed) return Promise.reject(new Error("the page is closed"));
+        async evaluate(expression, signal) {
+          if (closed) throw new Error("the page is closed");
+          if (script.ignoresAbort === "evaluate") return neverSettles();
           if (script.hangUntilAborted === "evaluate") return hangs(signal, "evaluate");
+          if (script.stepDelayMs !== undefined) await paused(script.stepDelayMs);
           // A real adapter would evaluate the expression; the synthetic one looks it up, which
           // is enough to model that a replaced document has forgotten what the old one held.
-          return Promise.resolve(memory[expression]);
+          return memory[expression];
         },
         drainEvents() {
           const drained = pending;
@@ -83,6 +101,7 @@ export function createSyntheticBrowser(script: SyntheticScript = {}): BrowserAda
 
       void request;
       last = page;
+      if (script.stepDelayMs !== undefined) return paused(script.stepDelayMs).then(() => page);
       return Promise.resolve(page);
     },
   };
