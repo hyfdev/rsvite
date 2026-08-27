@@ -736,3 +736,89 @@ test("an adapter that throws synchronously becomes a classified browser failure"
   assert.equal(failure.phase, "browser");
   assert.match(failure.message, /synchronous adapter failure/);
 });
+
+test("an update that reports an error and then rejects keeps the error", async () => {
+  const port = await freePort();
+  const browser = createSyntheticBrowser({
+    documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
+  });
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser,
+    update: () => {
+      browser.lastPage()?.emit({ type: "console-error", message: "reported before the rejection" });
+      return Promise.reject(new Error("the update gave up"));
+    },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as { phase: string; message: string };
+
+  assert.equal(failure.phase, "browser");
+  assert.match(failure.message, /console-error: reported before the rejection/);
+  assert.deepEqual(result["browserErrors"], [
+    { type: "console-error", message: "reported before the rejection" },
+  ]);
+});
+
+test("an error reported before a failing sentinel read outranks the read's own failure", async () => {
+  const port = await freePort();
+  const browser = createSyntheticBrowser({
+    documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
+  });
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser,
+    update: () => {
+      const page = browser.lastPage();
+      page?.emit({ type: "page-error", message: "thrown before the final read" });
+      // The page is closed from under the final read, so that read rejects afterwards.
+      void page?.close(AbortSignal.timeout(1_000));
+      return Promise.resolve();
+    },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as { phase: string; message: string };
+
+  assert.equal(failure.phase, "browser");
+  assert.match(failure.message, /page-error: thrown before the final read/);
+  assert.deepEqual(result["browserErrors"], [
+    { type: "page-error", message: "thrown before the final read" },
+  ]);
+});
+
+test("a browser failure names no log evidence, because it has none", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser: createSyntheticBrowser({
+      openEvents: [{ type: "console-error", message: "browser said no" }],
+    }),
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as Record<string, unknown>;
+
+  assert.equal(failure["phase"], "browser");
+  assert.equal(
+    "evidencePath" in failure,
+    false,
+    "a browser failure pointed at an unrelated command log",
+  );
+  assert.deepEqual(result["browserErrors"], [
+    { type: "console-error", message: "browser said no" },
+  ]);
+});

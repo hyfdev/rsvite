@@ -424,12 +424,8 @@ async function observeBrowser(
     try {
       const expression = acceptance.hmr?.sentinelExpression;
       const before = await readSentinel(page, expression, browserBound);
-      if (!before.ok)
-        return {
-          events,
-          failure: { phase: "browser", message: before.reason, fromDeadline: true },
-        };
       events.push(...page.drainEvents());
+      if (!before.ok) return { events, failure: earlierOf(events, before.reason) };
 
       // Checked here, before the update, so an error the page reported on load is the first
       // incompatible behavior rather than whatever the update happens to produce later.
@@ -454,24 +450,19 @@ async function observeBrowser(
           "the update",
           CLEANUP_GRACE_MS,
         );
-        if (!updated.ok)
-          return {
-            events,
-            failure: { phase: "browser", message: updated.reason, fromDeadline: true },
-          };
-
-        // Drained after every awaited page operation, the final sentinel read included: an
-        // error the page reported while answering that last read used to stay in the adapter's
-        // queue and vanish from the record entirely.
+        // Drained after every awaited page operation, whether it succeeded or not: an update
+        // that reports an error and then rejects has still reported that error, and it happened
+        // first.
         const windowEvents = page.drainEvents();
+        if (!updated.ok) {
+          events.push(...windowEvents);
+          return { events, failure: earlierOf(windowEvents, updated.reason) };
+        }
+
         const after = await readSentinel(page, expression, browserBound);
         windowEvents.push(...page.drainEvents());
         events.push(...windowEvents);
-        if (!after.ok)
-          return {
-            events,
-            failure: { phase: "browser", message: after.reason, fromDeadline: true },
-          };
+        if (!after.ok) return { events, failure: earlierOf(windowEvents, after.reason) };
 
         // One ordered stream decides which incompatibility came first. A navigation wins only
         // when it was observed before an error, and a lost sentinel is observed last of all,
@@ -518,6 +509,15 @@ async function observeBrowser(
   } finally {
     browserBound.dispose();
   }
+}
+
+/**
+ * An operation that failed did so after whatever the page had already reported, so a recorded
+ * event outranks the operation's own reason. Only when the page reported nothing does the
+ * operation failure become the first incompatible behavior.
+ */
+function earlierOf(events: readonly BrowserEvent[], reason: string): ObservedFailure {
+  return firstBrowserError(events) ?? { phase: "browser", message: reason, fromDeadline: true };
 }
 
 function isErrorEvent(event: BrowserEvent): boolean {
@@ -624,11 +624,13 @@ async function finish(
   if (failure !== undefined) {
     // An install failure's evidence is the install log. Pointing at the lifecycle log would
     // send a reader to a file this run never created.
-    const evidence = basename(logs[failedPhase].stderr);
+    const evidence = failure.phase === "browser" ? undefined : basename(logs[failedPhase].stderr);
     result["firstIncompatibleBehavior"] = {
       phase: failure.phase,
       message: failure.message,
-      ...(artifactPaths.includes(evidence) ? { evidencePath: evidence } : {}),
+      ...(evidence !== undefined && artifactPaths.includes(evidence)
+        ? { evidencePath: evidence }
+        : {}),
     };
     const classification = request.declared.classifyFailure(failure);
     if (classification === undefined) {
