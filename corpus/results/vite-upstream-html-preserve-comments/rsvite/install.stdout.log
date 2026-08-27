@@ -8,4 +8,4 @@ Progress: resolved 109, reused 109, downloaded 0, added 109, done
 . postinstall$ simple-git-hooks
 . postinstall: [ERROR], Was not able to set git hooks. Error: Error: ENOTDIR: not a directory, mkdir '/root/Documents/github-opensource/.worktrees/vite-ee644014-issue-4-fresh/.git/hooks'
 . postinstall: Done
-Done in 942ms using pnpm v10.34.5
+Done in 962ms using pnpm v10.34.5

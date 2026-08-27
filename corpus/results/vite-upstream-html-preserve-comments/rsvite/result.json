@@ -1,0 +1,68 @@
+{
+  "contractVersion": 1,
+  "manifestEntry": {
+    "id": "vite-upstream-html-preserve-comments",
+    "sourceCommit": "ee644014aab61e546742b862a7d7b0d6c7d67a7b"
+  },
+  "subject": {
+    "name": "rsvite",
+    "version": "0.0.0",
+    "commit": "4d5ea17d986b607449b1ebcd0d6e0896d4fa70a3"
+  },
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "runnerImage": "local",
+    "nodeVersion": "24.20.0",
+    "packageManager": {
+      "name": "pnpm",
+      "version": "10.34.5"
+    },
+    "browser": {
+      "name": "chromium",
+      "version": "151.0.7922.34"
+    }
+  },
+  "command": {
+    "argv": [
+      "/root/Documents/github-opensource/.worktrees/vite-ee644014-issue-4-fresh/node_modules/.pnpm/vitest@4.1.11_@types+node@24.13.3_vite@packages+vite/node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "/root/Documents/github-opensource/.worktrees/rsvite-issue-10-m1-vertical-slice/packages/rsvite/vite.upstream.config.ts"
+    ],
+    "cwd": "/root/Documents/github-opensource/.worktrees/vite-ee644014-issue-4-fresh",
+    "exitCode": 1
+  },
+  "startedAt": "2026-08-27T22:40:15.608Z",
+  "finishedAt": "2026-08-27T22:40:17.273Z",
+  "outcome": "fail",
+  "javascriptApiLevel": "C0",
+  "capabilityOwners": [
+    {
+      "capability": "html",
+      "owner": "rust"
+    }
+  ],
+  "explicitFallbacks": [],
+  "browserErrors": [],
+  "artifactPaths": [
+    "install.stdout.log",
+    "install.stderr.log",
+    "test.stdout.log",
+    "test.stderr.log"
+  ],
+  "firstIncompatibleBehavior": {
+    "phase": "test",
+    "message": "test exited with code 1",
+    "evidencePath": "test.stderr.log"
+  },
+  "failureClassification": {
+    "kind": "current-compatibility-requirement",
+    "evidence": "Vite passes after playground/html/vite.config.js runs its transformIndexHtml hook; the rsvite C0 subject ignores configuration and Plugin API, so the unchanged test diverges during test."
+  },
+  "extensions": {
+    "x-vite-upstream": {
+      "browserObservation": "nested-vitest-browser-not-observed-by-runner"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  playground/html/__tests__/html.spec.ts > main > preserve comments
+AssertionError: expected '<h1>Hello</h1>\n<!-- comment two -->\…' to match '<!-- comment one -->'
+
+- Expected
++ Received
+
+- <!-- comment one -->
++ <h1>Hello</h1>
++ <!-- comment two -->
++ <script type="module"></script>
++ <script type="module" src="/main.js"></script>
++ <link rel="icon" href="{{cdn_host}}/cdn/images/favicon.ico">
++ <link rel="stylesheet" href="{{cdn_host}}/css.css" type="text/css">
++ <script src="{{cdn_host}}/js.js" vite-ignore=""></script>
++ <p>index.html (fallback)</p>
++
++ <div>External path: <span class="external-path"></span></div>
++ <script type="module" src="/external-path.js" vite-ignore=""></script>
++ <script type="module" vite-ignore=""></script>
++ <link rel="stylesheet" href="/external-path.css" vite-ignore="">
++ <div>
++   External path by rolldownOptions.external (build only):
++   <span class="external-path-by-rollup-options"></span>
++ </div>
++
+
+ ❯ playground/html/__tests__/html.spec.ts:101:18
+     99|   test('preserve comments', async () => {
+    100|     const html = await page.innerHTML('body')
+    101|     expect(html).toMatch(`<!-- comment one -->`)
+       |                  ^
+    102|     expect(html).toMatch(`<!-- comment two -->`)
+    103|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+

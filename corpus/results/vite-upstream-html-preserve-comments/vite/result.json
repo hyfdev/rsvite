@@ -17,6 +17,10 @@
     "packageManager": {
       "name": "pnpm",
       "version": "10.34.5"
+    },
+    "browser": {
+      "name": "chromium",
+      "version": "151.0.7922.34"
     }
   },
   "command": {
@@ -30,10 +34,10 @@
     "cwd": "/root/Documents/github-opensource/.worktrees/vite-ee644014-issue-4-fresh",
     "exitCode": 0
   },
-  "startedAt": "2026-08-27T13:49:55.536Z",
-  "finishedAt": "2026-08-27T13:49:57.851Z",
+  "startedAt": "2026-08-27T22:40:12.644Z",
+  "finishedAt": "2026-08-27T22:40:14.930Z",
   "outcome": "pass",
-  "javascriptApiLevel": "C0",
+  "javascriptApiLevel": "C2",
   "capabilityOwners": [
     {
       "capability": "html",
@@ -47,5 +51,10 @@
     "install.stderr.log",
     "test.stdout.log",
     "test.stderr.log"
-  ]
+  ],
+  "extensions": {
+    "x-vite-upstream": {
+      "browserObservation": "nested-vitest-browser-not-observed-by-runner"
+    }
+  }
 }
