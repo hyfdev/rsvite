@@ -20,5 +20,10 @@
     "find": "<Trans>Welcome to Actual</Trans>",
     "replace": "<Trans>Welcome to Actual (rsvite update probe)</Trans>",
     "expectedText": "Welcome to Actual (rsvite update probe)"
+  },
+  "translations": {
+    "repository": "https://github.com/actualbudget/translations",
+    "commit": "05d15e964dd8a16516d8ba6508ed405554a2e3ec",
+    "path": "packages/desktop-client/locale"
   }
 }

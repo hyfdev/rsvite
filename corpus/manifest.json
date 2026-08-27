@@ -119,7 +119,16 @@
         "build-output"
       ],
       "javascriptApiLevel": "C1",
-      "notes": "Complex React monorepo gate. The adapter drives the project's own onboarding E2E spec and build without modifying its source or expectations."
+      "notes": "Complex React monorepo gate. The adapter drives the project's own onboarding E2E spec and build without modifying its source or expectations.",
+      "extensions": {
+        "x-actual-budget": {
+          "translations": {
+            "repository": "https://github.com/actualbudget/translations",
+            "commit": "05d15e964dd8a16516d8ba6508ed405554a2e3ec",
+            "path": "packages/desktop-client/locale"
+          }
+        }
+      }
     }
   ]
 }

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CommandSpec, DeclaredRunInputs } from "@rsvite/compatibility-runner";
+import type { CommandSpec, DeclaredRunInputs, LifecycleName } from "@rsvite/compatibility-runner";
 import { SENTINEL_EXPRESSION } from "./browser.ts";
 
 /** The pinned identity of the validated project, kept out of code so a change is reviewable. */
@@ -22,6 +22,15 @@ export interface Pin {
     readonly find: string;
     readonly replace: string;
     readonly expectedText: string;
+  };
+  /**
+   * The second input the production build reads. It lives inside the checkout but outside its
+   * git history, so pinning the project alone does not pin what gets built.
+   */
+  readonly translations: {
+    readonly repository: string;
+    readonly commit: string;
+    readonly path: string;
   };
 }
 
@@ -109,7 +118,7 @@ export function actualBudgetEntry(pin: Pin = readPin()): Record<string, unknown>
     source: { repository: pin.repository, commit: pin.commit, license: pin.license },
     lockfile: pin.lockfile,
     commands: actualBudgetCommands(pin),
-    readiness: { type: "http-ready", urlPath: "/", expectStatus: 200, timeoutMs: 300000 },
+    readiness: actualBudgetReadiness("dev"),
     browserAcceptance: {
       entryPath: "/",
       mainFrameNavigationIsFailure: true,
@@ -135,7 +144,21 @@ export function actualBudgetEntry(pin: Pin = readPin()): Record<string, unknown>
     javascriptApiLevel: "C1",
     notes:
       "Complex React monorepo gate. The adapter drives the project's own onboarding E2E spec and build without modifying its source or expectations.",
+    // The production build compiles this second checkout into the bundle. It lives inside the
+    // project but outside its git history, so the entry has to name it or the recorded commit
+    // and lockfile do not determine what was built.
+    extensions: { "x-actual-budget": { translations: pin.translations } },
   };
+}
+
+/**
+ * How each lifecycle reports being usable. A development or preview server is ready when it
+ * answers; a production build is ready when it has finished. Waiting for a build to serve
+ * something would time out against a command that did exactly what it was asked to.
+ */
+export function actualBudgetReadiness(lifecycle: LifecycleName): Record<string, unknown> {
+  if (lifecycle === "build") return { type: "process-exit", timeoutMs: 1_200_000 };
+  return { type: "http-ready", urlPath: "/", expectStatus: 200, timeoutMs: 300_000 };
 }
 
 /**
@@ -192,22 +215,30 @@ export function rsviteCommands(
  * nothing to fall back to, so a baseline failure is a statement about the input rather than
  * about an implementation gap: it means the corpus entry itself cannot be used as a gate.
  */
-export function viteDeclaration(): DeclaredRunInputs {
+export function viteDeclaration(lifecycle: LifecycleName): DeclaredRunInputs {
   return {
     javascriptApiLevel: "C1",
-    capabilityOwners: [
-      "html",
-      "modules-and-assets",
-      "resolution",
-      "file-watching",
-      "hmr-without-full-reload",
-    ].map((capability) => ({ capability, owner: "vite" })),
+    capabilityOwners: viteCapabilities(lifecycle).map((capability) => ({
+      capability,
+      owner: "vite",
+    })),
     explicitFallbacks: [],
     classifyFailure: (failure) => ({
       kind: "current-compatibility-requirement",
       evidence: `The original Vite baseline failed during ${failure.phase}, so the input itself is not usable as a gate until this is understood.`,
     }),
   };
+}
+
+/**
+ * Which capabilities a lifecycle is in a position to demonstrate. A development run shows nothing
+ * about the production bundle, and a build shows nothing about updating a running document, so
+ * neither may claim the other's — whole-entry coverage is what the two results establish together.
+ */
+function viteCapabilities(lifecycle: LifecycleName): readonly string[] {
+  return lifecycle === "build"
+    ? ["build-output"]
+    : ["html", "modules-and-assets", "resolution", "file-watching", "hmr-without-full-reload"];
 }
 
 /**

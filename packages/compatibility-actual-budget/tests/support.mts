@@ -13,12 +13,15 @@ export interface StubOptions {
   readonly failAfterLaunch?: boolean;
   readonly launchDelayMs?: number;
   readonly browserVersion?: string;
+  /** Which post-launch setup step never settles. */
+  readonly hangIn?: "newContext" | "addInitScript" | "newPage";
 }
 
 export interface StubCheckout {
   readonly root: string;
   launched(): number;
   closed(): number;
+  contextStarted(): number;
   /** The page the stand-in last handed out, for driving events after arrival. */
   page(): { navigate(to: string): void };
 }
@@ -43,7 +46,7 @@ export function stubCheckout(options: StubOptions = {}): StubCheckout {
   writeFileSync(join(target, "stub-config.json"), JSON.stringify(options));
 
   const statePath = join(target, "stub-state.json");
-  const read = (key: "launched" | "closed"): number => {
+  const read = (key: "launched" | "closed" | "contextStarted"): number => {
     if (!existsSync(statePath)) return 0;
     const state = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, number>;
     return state[key] ?? 0;
@@ -53,6 +56,7 @@ export function stubCheckout(options: StubOptions = {}): StubCheckout {
     root,
     launched: () => read("launched"),
     closed: () => read("closed"),
+    contextStarted: () => read("contextStarted"),
     page: () =>
       (
         createRequire(join(root, "package.json"))("playwright") as {
@@ -89,7 +93,9 @@ export function pinnedCheckout(): {
     "packages/desktop-client/src/components/manager/WelcomeScreen.tsx",
     "<Trans>Welcome</Trans>\n",
   );
-  write(".gitignore", "ignored/\n");
+  // Ignored by the project exactly as upstream ignores its translations checkout, which is what
+  // makes an ordinary status of the outer checkout unable to see it.
+  write(".gitignore", "ignored/\npackages/desktop-client/locale\n");
 
   const git = (...args: string[]): string =>
     execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
@@ -98,6 +104,17 @@ export function pinnedCheckout(): {
   git("config", "user.name", "recorder");
   git("add", "--all");
   git("commit", "--quiet", "--message", "pinned");
+
+  // A second input the build reads, living inside the checkout but outside its history.
+  const localePath = "packages/desktop-client/locale";
+  write(join(localePath, "en.json"), `{"welcome":"Welcome"}\n`);
+  const locale = (...args: string[]): string =>
+    execFileSync("git", ["-C", join(root, localePath), ...args], { encoding: "utf8" }).trim();
+  locale("init", "--quiet");
+  locale("config", "user.email", "recorder@example.invalid");
+  locale("config", "user.name", "recorder");
+  locale("add", "--all");
+  locale("commit", "--quiet", "--message", "translations");
 
   const pin: Pin = {
     repository: "https://example.invalid/actual",
@@ -109,6 +126,11 @@ export function pinnedCheckout(): {
     devPort: 3001,
     sentinelEditPath: "packages/desktop-client/src/components/manager/WelcomeScreen.tsx",
     sentinelEdit: { find: "Welcome", replace: "Welcome (probe)", expectedText: "Welcome (probe)" },
+    translations: {
+      repository: "https://example.invalid/translations",
+      commit: locale("rev-parse", "HEAD"),
+      path: localePath,
+    },
   };
   return { root, pin, write };
 }
