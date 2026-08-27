@@ -1,54 +1,29 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, writeFileSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { test } from "vite-plus/test";
-import { createPlaywrightBrowser } from "../src/browser.ts";
+import { createPlaywrightBrowser, settle, type Observable } from "../src/browser.ts";
+import { nextMacrotask, stubCheckout } from "./support.mts";
 
-/**
- * A checkout whose `node_modules/playwright` is a stand-in that redirects the page shortly after
- * it opens. The adapter resolves it exactly as it resolves a real checkout's Playwright, so this
- * exercises `open` itself rather than a piece lifted out of it for testing.
- */
-function checkoutWithStubPlaywright(): string {
-  const root = mkdtempSync(join(tmpdir(), "ab-stub-"));
-  const target = join(root, "node_modules/playwright");
-  mkdirSync(target, { recursive: true });
-  writeFileSync(join(root, "package.json"), `{"name":"stub-checkout","version":"0.0.0"}\n`);
-  writeFileSync(
-    join(target, "package.json"),
-    `{"name":"playwright","version":"0.0.0","main":"index.cjs"}\n`,
-  );
-  cpSync(
-    fileURLToPath(new URL("./fixtures/stub-playwright.cjs", import.meta.url)),
-    join(target, "index.cjs"),
-  );
-  return root;
+const FAST = { quietObservations: 3, maxObservations: 12, intervalMs: 0 } as const;
+
+function opening(checkoutRoot: string, signal: AbortSignal) {
+  return createPlaywrightBrowser(checkoutRoot).open({
+    url: "http://localhost:3001/",
+    timeoutMs: 30_000,
+    signal,
+  });
 }
 
 test("a redirect performed while the page is arriving is not reported as an update", async () => {
-  const browser = createPlaywrightBrowser(checkoutWithStubPlaywright());
+  const stub = stubCheckout();
   const controller = new AbortController();
 
-  const page = await browser.open({
-    url: "http://localhost:3001/",
-    timeoutMs: 30_000,
-    signal: controller.signal,
-  });
-  // Drained after the redirect has certainly been delivered: the stand-in schedules it on the
-  // macrotask following `goto`, so it is ordered after arrival begins without depending on any
-  // particular delay. Draining before it would pass even with the wait removed, because the
-  // event would simply not have happened yet.
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  const page = await opening(stub.root, controller.signal);
+  // The redirect is ordered after `goto`; letting one macrotask run is enough for it to land,
+  // and draining before it would pass even with the arrival wait removed.
+  await nextMacrotask();
   const observed = page.drainEvents();
   await page.close(controller.signal);
 
-  // The stand-in navigates the main frame 150ms after `goto` resolves. Reporting it would put an
-  // application's own startup routing inside the update window, where the runner reads a
-  // main-frame navigation as a full reload.
   assert.deepEqual(
     observed,
     [],
@@ -57,29 +32,73 @@ test("a redirect performed while the page is arriving is not reported as an upda
 });
 
 test("a navigation after the page has arrived is reported, with its identity", async () => {
-  const checkout = checkoutWithStubPlaywright();
-  const browser = createPlaywrightBrowser(checkout);
+  const stub = stubCheckout();
   const controller = new AbortController();
 
-  const page = await browser.open({
-    url: "http://localhost:3001/",
-    timeoutMs: 30_000,
-    signal: controller.signal,
-  });
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  const page = await opening(stub.root, controller.signal);
+  await nextMacrotask();
   page.drainEvents();
-
-  // Arriving is over; this navigation is the document being replaced, and must be reported as
-  // such — otherwise discarding the redirect would have cost the adapter its ability to see a
-  // real reload at all.
-  const stub = createRequire(join(checkout, "package.json"))("playwright") as {
-    __lastPage(): { navigate(to: string): void };
-  };
-  stub.__lastPage().navigate("/reloaded");
+  stub.page().navigate("/reloaded");
   const observed = page.drainEvents();
   await page.close(controller.signal);
 
+  // Discarding the redirect must not have cost the adapter its ability to see a real reload.
   assert.deepEqual(observed, [
     { type: "main-frame-navigated", url: "http://localhost:3001/reloaded" },
   ]);
+});
+
+test("a page that never finishes arriving raises instead of opening the update window", async () => {
+  const moving: Observable = (() => {
+    let observation = 0;
+    return {
+      url: () => {
+        observation += 1;
+        return `http://localhost:3001/moving-${String(observation)}`;
+      },
+    };
+  })();
+
+  await assert.rejects(settle(moving, FAST), /never finished arriving/);
+});
+
+test("arriving ends after a run of unchanged observations, not after a single one", async () => {
+  let observation = 0;
+  // Still, then one move, then still again: a single unchanged observation must not end it.
+  const flickering: Observable = {
+    url: () => {
+      observation += 1;
+      return observation === 2 ? "http://localhost:3001/bootstrap" : "http://localhost:3001/";
+    },
+  };
+
+  await settle(flickering, FAST);
+
+  // Three consecutive unchanged observations are required, and the move at the second resets the
+  // run, so settling cannot have happened before the sixth.
+  assert.ok(observation >= 5, `settled after only ${String(observation)} observations`);
+});
+
+test("a browser that finishes launching after the open was aborted is still closed", async () => {
+  const stub = stubCheckout({ launchDelayMs: 40 });
+  const controller = new AbortController();
+
+  const open = opening(stub.root, controller.signal);
+  controller.abort(new Error("the runner gave up"));
+  await assert.rejects(open, /launching the browser was aborted/);
+  // The launch was already under way; whatever it produced has to be released.
+  await new Promise((resolve) => setTimeout(resolve, 120));
+
+  assert.equal(stub.launched(), 1, "the stand-in never launched, so nothing was being tested");
+  assert.equal(stub.closed(), 1, "the browser produced after the abort was left running");
+});
+
+test("a failure after launch closes the browser it had already acquired", async () => {
+  const stub = stubCheckout({ failAfterLaunch: true });
+  const controller = new AbortController();
+
+  await assert.rejects(opening(stub.root, controller.signal), /context could not be created/);
+
+  assert.equal(stub.launched(), 1);
+  assert.equal(stub.closed(), 1, "the browser was left running behind a rejected open");
 });
