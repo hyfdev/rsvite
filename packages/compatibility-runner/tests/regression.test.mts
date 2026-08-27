@@ -973,3 +973,44 @@ test("a server that turns an external SIGTERM into a clean exit still fails the 
   assert.equal(failure.phase, "dev");
   assert.match(failure.message, /ended on its own during browser acceptance/);
 });
+
+test("an external termination is not hidden by a host that was too busy to notice", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", { origin: `http://127.0.0.1:${String(port)}` });
+  const pidFile = join(request.artifactRoot, "server.pid");
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
+  };
+  manifest.entries[0]!.commands["dev"] = {
+    argv: [process.execPath, fixture("serve.mjs")],
+    env: { PORT: String(port), OWN_PID_FILE: pidFile, EXIT_ON_SIGTERM: "0" },
+  };
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest,
+    browser: {
+      open: () => {
+        process.kill(Number(readFileSync(pidFile, "utf8")), "SIGTERM");
+        // Blocking the loop keeps the close event undelivered until after the stop begins, and
+        // leaves the exited process a zombie — which still accepts signals. Neither the event
+        // nor a successful signal can tell the runner what happened; the kernel's record can.
+        const until = Date.now() + 250;
+        while (Date.now() < until) {
+          /* block */
+        }
+        return Promise.resolve({
+          evaluate: () => Promise.resolve(undefined),
+          drainEvents: () => [],
+          close: () => Promise.resolve(),
+        });
+      },
+    },
+  });
+  const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as { phase: string; message: string };
+
+  assert.equal(result["outcome"], "fail", "an externally terminated server was recorded as a pass");
+  assert.equal(failure.phase, "dev");
+  assert.match(failure.message, /ended on its own/);
+});

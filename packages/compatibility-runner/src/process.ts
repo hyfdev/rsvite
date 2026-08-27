@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, readFileSync } from "node:fs";
 import { once } from "node:events";
 import { sleep, timer } from "./deadline.ts";
 
@@ -54,6 +54,24 @@ const liveGroups = new Set<number>();
 process.once("exit", () => {
   for (const pgid of liveGroups) signalGroup(pgid, "SIGKILL");
 });
+
+/**
+ * What the kernel says about a process, independently of what this host has observed. A
+ * process that exited while the host was busy is a zombie until it is reaped: its close event
+ * has not been delivered, and it still accepts signals, so neither of those can tell us it is
+ * over. Outside Linux there is no such record and the caller falls back to the other rules.
+ */
+function livenessOf(pid: number | undefined): "running" | "ended" | "unknown" {
+  if (pid === undefined) return "unknown";
+  try {
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, "utf8");
+    // The state letter follows the executable name, which may itself contain spaces.
+    const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+    return state === "Z" ? "ended" : "running";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "ended" : "unknown";
+  }
+}
 
 type Delivery = "delivered" | "gone" | "denied";
 
@@ -151,11 +169,17 @@ interface Capture {
   stderr: string;
 }
 
+interface Captured {
+  readonly buffers: Capture;
+  /** Resolves once the log files are closed, so their existence is a settled fact. */
+  readonly flushed: Promise<void>;
+}
+
 function capture(
   child: ChildProcess,
   logPaths: { stdout: string; stderr: string } | undefined,
   onSpawnError: (message: string) => void,
-): Capture {
+): Captured {
   // Streams are closed on `error` as well as on `close`; a command that never started still
   // opened its log files.
   const buffers: Capture = { stdout: "", stderr: "" };
@@ -171,6 +195,13 @@ function capture(
     buffers.stderr += chunk.toString("utf8");
     streams?.stderr.write(chunk);
   });
+
+  const flushed =
+    streams === undefined
+      ? Promise.resolve()
+      : Promise.all([once(streams.stdout, "close"), once(streams.stderr, "close")])
+          .then(() => undefined)
+          .catch(() => undefined);
 
   const endStreams = (): void => {
     streams?.stdout.end();
@@ -188,7 +219,7 @@ function capture(
     streams?.stderr.write(`${message}\n`);
     endStreams();
   });
-  return buffers;
+  return { buffers, flushed };
 }
 
 /** Starts a command and leaves it running; the caller decides when it is ready and when to stop. */
@@ -198,7 +229,7 @@ export function startCommand(
 ): StartedCommand {
   const child = spawnGroup(command);
   const state: { startError?: string } = {};
-  const buffers = capture(child, logPaths, (message) => {
+  const { buffers, flushed } = capture(child, logPaths, (message) => {
     state.startError = message;
   });
 
@@ -244,9 +275,16 @@ export function startCommand(
       // whether the process still exists cannot answer this: a kill is asynchronous, so a
       // doomed process still reports itself alive for a moment afterwards.
       const alreadyClosed = closed;
+      // Asked of the kernel before anything is signalled. A process that has already exited
+      // but has not been reaped is a zombie, and a zombie still accepts signals — so
+      // signalling it successfully proves nothing, and its close event may not have been
+      // delivered yet if the host was busy. Its recorded state does not depend on either.
+      const stateBeforeStop = livenessOf(child.pid);
       const termination = pgid === undefined ? { alreadyGone: true } : await terminateGroup(pgid);
-      // The leader's own outcome, not merely the group's absence.
+      // The leader's own outcome, not merely the group's absence, and then its logs: a result
+      // that lists only the files that exist must not race the stream still creating them.
       await exited;
+      await flushed;
 
       // Attribution rather than timing. The command ended on its own if it was already over
       // when the stop began, if the group had already vanished by the time this runner first
@@ -258,6 +296,7 @@ export function startCommand(
       const deliveredAt = record?.firstDeliveredAt;
       endedBeforeStop =
         alreadyClosed ||
+        stateBeforeStop === "ended" ||
         termination.alreadyGone ||
         (signal !== null && record?.sent.has(signal) !== true) ||
         (endedAt !== undefined && deliveredAt !== undefined && endedAt < deliveredAt);
