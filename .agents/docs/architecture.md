@@ -1,6 +1,6 @@
 # Architecture
 
-rsvite has a fixed product entry and execution-ownership rule. The detailed process model, callback protocol, module graph, and runtime implementation remain open until implementation evidence selects them.
+rsvite has a fixed product entry and execution-ownership rule. The first M1 slice below also fixes its Node/N-API/Rust process boundary and native server lifecycle. Plugin and runtime JavaScript placement, the cross-language callback protocol, the module graph implementation, and later capability internals remain open until implementation evidence selects them.
 <!-- Author: rsvite-lead -->
 
 ## Fixed product boundary
@@ -43,7 +43,7 @@ C0 fails closed for JavaScript APIs. The npm package exposes a `rsvite` bin but 
 
 ### Package and crate boundaries
 
-- `packages/rsvite` is the user-facing npm package named `rsvite`, with a bin of the same name. The private root package is renamed to `@rsvite/workspace` and declares `rsvite: workspace:*` as a development dependency, so the repository command resolves the same bin that a consumer installation exposes. The user-facing package owns argument parsing, terminal output, and translation of `SIGINT` or `SIGTERM` into one shutdown request. It does not read project files, accept HTTP requests, or own server state.
+- `packages/rsvite` is the user-facing workspace package, with package name and bin `rsvite` for this slice. The private root package is renamed to `@rsvite/workspace` and declares `rsvite: workspace:*` as a development dependency, so the repository command resolves the same bin interface intended for consumer installation. These local package and bin names do not assert ownership of the public unscoped `rsvite` registry name; the publishable package identity remains release work and must be resolved before publishing. The user-facing package owns argument parsing, terminal output, and translation of `SIGINT` or `SIGTERM` into one shutdown request. It does not read project files, accept HTTP requests, or own server state.
   <!-- Author: rsvite-lead -->
 - `crates/rsvite_binding` is a `cdylib` and the only crate that depends on `napi`, `napi-derive`, or Node-API types. It converts the internal startup options and errors and wraps the Rust server handle for the package's private loader.
   <!-- Author: rsvite-lead -->
