@@ -1,0 +1,26 @@
+{
+  "contractVersion": 1,
+  "entries": [
+    {
+      "id": "vite-upstream-playground-slice",
+      "kind": "vite-upstream-e2e",
+      "source": {
+        "repository": "https://github.com/vitejs/vite",
+        "commit": "ee644014aab61e546742b862a7d7b0d6c7d67a7b",
+        "license": { "spdxId": "MIT", "path": "LICENSE" }
+      },
+      "lockfile": {
+        "path": "pnpm-lock.yaml",
+        "packageManager": { "name": "pnpm", "version": "11.20.0" }
+      },
+      "commands": {
+        "install": { "argv": ["pnpm", "install", "--frozen-lockfile"] },
+        "test": { "argv": ["pnpm", "test-serve", "playground/css"] }
+      },
+      "readiness": { "type": "process-exit", "timeoutMs": 900000 },
+      "expectedCapabilities": ["modules-and-assets"],
+      "javascriptApiLevel": "C1",
+      "extensions": { "viteUpstream": { "suite": "playground/css" } }
+    }
+  ]
+}

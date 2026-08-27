@@ -1,0 +1,81 @@
+{
+  "contractVersion": 1,
+  "entries": [
+    {
+      "id": "drawdb",
+      "kind": "real-project",
+      "source": {
+        "repository": "https://github.com/drawdb-io/drawdb",
+        "commit": "031aef1f1c1d3f9027ccfacbf084e9c1a31b8abc",
+        "license": { "spdxId": "AGPL-3.0", "path": "LICENSE" }
+      },
+      "lockfile": {
+        "path": "package-lock.json",
+        "packageManager": { "name": "npm", "version": "10.9.2" }
+      },
+      "commands": {
+        "install": { "argv": ["npm", "ci"] },
+        "dev": { "argv": ["npm", "run", "dev", "--", "--port", "5173"] },
+        "build": { "argv": ["npm", "run", "build"] },
+        "preview": { "argv": ["npm", "run", "preview", "--", "--port", "4173"] }
+      },
+      "readiness": {
+        "type": "http-ready",
+        "urlPath": "/",
+        "expectStatus": 200,
+        "timeoutMs": 120000
+      },
+      "browserAcceptance": {
+        "entryPath": "/",
+        "mainFrameNavigationIsFailure": true,
+        "hmr": {
+          "sentinelExpression": "globalThis.__rsviteHmrSentinel",
+          "sentinelStorage": "in-memory",
+          "edit": {
+            "path": "src/App.jsx",
+            "find": "rsvite-hmr-before",
+            "replace": "rsvite-hmr-after"
+          },
+          "expectedText": "rsvite-hmr-after"
+        }
+      },
+      "expectedCapabilities": [
+        "modules-and-assets",
+        "resolution",
+        "file-watching",
+        "hmr-without-full-reload",
+        "build-output",
+        "preview-output"
+      ],
+      "javascriptApiLevel": "C1",
+      "notes": "Illustrative entry. The adopted corpus is assembled by the M0 issues, not by this example."
+    },
+    {
+      "id": "vite-upstream-playground-slice",
+      "kind": "vite-upstream-e2e",
+      "source": {
+        "repository": "https://github.com/vitejs/vite",
+        "commit": "ee644014aab61e546742b862a7d7b0d6c7d67a7b",
+        "license": { "spdxId": "MIT", "path": "LICENSE" }
+      },
+      "lockfile": {
+        "path": "pnpm-lock.yaml",
+        "packageManager": { "name": "pnpm", "version": "11.20.0" }
+      },
+      "commands": {
+        "install": { "argv": ["pnpm", "install", "--frozen-lockfile"] },
+        "test": {
+          "argv": ["pnpm", "test-serve", "playground/css"],
+          "env": { "VITE_TEST_BUILD": "0" }
+        }
+      },
+      "readiness": { "type": "process-exit", "timeoutMs": 900000 },
+      "expectedCapabilities": ["modules-and-assets", "resolution", "errors"],
+      "javascriptApiLevel": "C1",
+      "notes": "Illustrative entry. Upstream tests and fixtures stay unchanged; the runner and its result mapping live outside the vendored copy.",
+      "extensions": {
+        "x-vite-upstream": { "suite": "playground/css", "mode": "serve" }
+      }
+    }
+  ]
+}

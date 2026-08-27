@@ -28,9 +28,12 @@ export default defineConfig({
       "check:rust": {
         command: "cargo metadata --format-version 1 --no-deps",
       },
+      "check:test:contract": {
+        command: "vp test --config packages/compatibility-contract/vite.config.ts",
+      },
       ready: {
         command: "echo ready checks passed",
-        dependsOn: ["check:format", "check:lint", "check:rust"],
+        dependsOn: ["check:format", "check:lint", "check:rust", "check:test:contract"],
       },
     },
   },

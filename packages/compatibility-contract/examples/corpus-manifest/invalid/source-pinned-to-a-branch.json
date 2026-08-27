@@ -1,0 +1,28 @@
+{
+  "contractVersion": 1,
+  "entries": [
+    {
+      "id": "drawdb",
+      "kind": "real-project",
+      "source": {
+        "repository": "https://github.com/drawdb-io/drawdb",
+        "commit": "main",
+        "license": { "spdxId": "AGPL-3.0", "path": "LICENSE" }
+      },
+      "lockfile": {
+        "path": "package-lock.json",
+        "packageManager": { "name": "npm", "version": "10.9.2" }
+      },
+      "commands": {
+        "install": { "argv": ["npm", "ci"] },
+        "dev": { "argv": ["npm", "run", "dev"] },
+        "build": { "argv": ["npm", "run", "build"] },
+        "preview": { "argv": ["npm", "run", "preview"] }
+      },
+      "readiness": { "type": "http-ready", "urlPath": "/", "timeoutMs": 120000 },
+      "browserAcceptance": { "entryPath": "/", "mainFrameNavigationIsFailure": true },
+      "expectedCapabilities": ["modules-and-assets"],
+      "javascriptApiLevel": "C1"
+    }
+  ]
+}

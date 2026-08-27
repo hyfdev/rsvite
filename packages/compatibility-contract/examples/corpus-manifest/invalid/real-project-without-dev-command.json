@@ -1,0 +1,27 @@
+{
+  "contractVersion": 1,
+  "entries": [
+    {
+      "id": "actual-budget",
+      "kind": "real-project",
+      "source": {
+        "repository": "https://github.com/actualbudget/actual",
+        "commit": "766cc8a7244c35f575ecc33a7a718b060cb5d496",
+        "license": { "spdxId": "MIT", "path": "LICENSE" }
+      },
+      "lockfile": {
+        "path": "yarn.lock",
+        "packageManager": { "name": "yarn", "version": "4.9.1" }
+      },
+      "commands": {
+        "install": { "argv": ["yarn", "install", "--immutable"] },
+        "build": { "argv": ["yarn", "build"] },
+        "preview": { "argv": ["yarn", "preview"] }
+      },
+      "readiness": { "type": "http-ready", "urlPath": "/", "timeoutMs": 120000 },
+      "browserAcceptance": { "entryPath": "/", "mainFrameNavigationIsFailure": true },
+      "expectedCapabilities": ["modules-and-assets"],
+      "javascriptApiLevel": "C1"
+    }
+  ]
+}

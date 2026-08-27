@@ -19,6 +19,11 @@ Product capability records observable behavior: supported modules and assets, re
 - **C3 — selected Runtime and programmatic API:** runtime, environment, SSR, and JavaScript programmatic behavior are added from framework and application evidence.
   <!-- Author: rsvite-lead -->
 
+## Corpus and result contract
+
+Every validation input and every raw result is recorded through the versioned schemas in [packages/compatibility-contract](../../packages/compatibility-contract). Those schemas are the normative form of the rules stated here, so a source pinned to a moving reference, a result missing its correctness outcome or capability owner, an HMR check with a persisted sentinel, or a measurement missing its cache state and run order fails validation instead of becoming evidence. Runners and project adapters consume that contract rather than defining a per-project result format, and an adapter extends it through its own namespaced key instead of editing vendored upstream sources or expectations.
+<!-- Author: rsvite-senior-engineer -->
+
 ## Required evidence sources
 
 ### Vite upstream E2E
