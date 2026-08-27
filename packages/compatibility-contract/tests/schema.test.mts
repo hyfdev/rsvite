@@ -17,33 +17,39 @@ function listExamples(relativeDir: string): string[] {
     .sort();
 }
 
-function violationPaths(result: ValidationResult): string[] {
-  return result.valid ? [] : result.violations.map((violation) => violation.path);
+function violationMessages(result: ValidationResult): string[] {
+  return result.valid ? [] : result.violations.map((violation) => violation.message);
 }
 
 /**
- * Each rejected example names the location the contract must complain about. Asserting the
- * location, not just "invalid", keeps a fixture from passing this test for the wrong reason
- * after an unrelated edit makes it malformed somewhere else.
+ * Each rejected example names the complaint the contract must produce. Asserting the specific
+ * message, rather than only that the document was rejected, keeps a fixture from passing this
+ * test for the wrong reason after an unrelated edit makes it malformed somewhere else. Several
+ * of these are missing-property cases that all report at the document root, so the location
+ * alone would not tell them apart.
  */
 const rejectedManifests: Record<string, string> = {
-  "duplicate-entry-id.json": "/entries/1/id",
-  "hmr-sentinel-in-local-storage.json": "/entries/0/browserAcceptance/hmr/sentinelStorage",
-  "real-project-without-dev-command.json": "/entries/0/commands",
-  "source-pinned-to-a-branch.json": "/entries/0/source/commit",
-  "source-without-license.json": "/entries/0/source",
-  "unknown-capability.json": "/entries/0/expectedCapabilities/0",
+  "duplicate-entry-id.json": "/entries/1/id duplicates an earlier entry id",
+  "hmr-sentinel-in-local-storage.json":
+    "/entries/0/browserAcceptance/hmr/sentinelStorage must be equal to constant",
+  "real-project-without-dev-command.json": "/entries/0/commands must have required property 'dev'",
+  "source-pinned-to-a-branch.json": "/entries/0/source/commit must match pattern",
+  "source-without-license.json": "/entries/0/source must have required property 'license'",
+  "unknown-capability.json":
+    "/entries/0/expectedCapabilities/0 must be equal to one of the allowed values",
   "unnamespaced-adapter-extension.json": "/entries/0/extensions",
 };
 
 const rejectedResults: Record<string, string> = {
-  "failure-without-first-incompatible-behavior.json": "",
-  "measurement-without-cache-state.json": "/measurements",
-  "missing-capability-owner.json": "",
-  "missing-correctness-outcome.json": "",
-  "source-commit-not-a-sha.json": "/manifestEntry/sourceCommit",
-  "timestamp-not-iso-8601.json": "/startedAt",
-  "undeclared-fallbacks.json": "",
+  "failure-without-first-incompatible-behavior.json":
+    "must have required property 'firstIncompatibleBehavior'",
+  "measurement-without-cache-state.json": "/measurements must have required property 'cacheState'",
+  "missing-capability-owner.json": "must have required property 'capabilityOwner'",
+  "missing-correctness-outcome.json": "must have required property 'outcome'",
+  "missing-javascript-api-level.json": "must have required property 'javascriptApiLevel'",
+  "source-commit-not-a-sha.json": "/manifestEntry/sourceCommit must match pattern",
+  "timestamp-not-iso-8601.json": "/startedAt must match format",
+  "undeclared-fallbacks.json": "must have required property 'explicitFallbacks'",
 };
 
 test("every valid corpus manifest example satisfies the contract", () => {
@@ -88,8 +94,10 @@ test("every rejected corpus manifest example is rejected at the documented locat
     );
     assert.equal(result.valid, false, `${name} should be rejected`);
     assert.ok(
-      violationPaths(result).includes(rejectedManifests[name] as string),
-      `${name} should be rejected at ${rejectedManifests[name]}, got ${violationPaths(result).join(", ")}`,
+      violationMessages(result).some((message) =>
+        message.includes(rejectedManifests[name] as string),
+      ),
+      `${name} should be rejected with "${rejectedManifests[name]}", got ${violationMessages(result).join("; ")}`,
     );
   }
 });
@@ -106,8 +114,10 @@ test("every rejected raw result example is rejected at the documented location",
     const result = validators.validateRawResult(readExample(`raw-result/invalid/${name}`));
     assert.equal(result.valid, false, `${name} should be rejected`);
     assert.ok(
-      violationPaths(result).includes(rejectedResults[name] as string),
-      `${name} should be rejected at "${rejectedResults[name]}", got ${violationPaths(result).join(", ")}`,
+      violationMessages(result).some((message) =>
+        message.includes(rejectedResults[name] as string),
+      ),
+      `${name} should be rejected with "${rejectedResults[name]}", got ${violationMessages(result).join("; ")}`,
     );
   }
 });
@@ -138,5 +148,5 @@ test("a contract version the schema does not define is rejected", () => {
   const result = validators.validateCorpusManifest({ ...manifest, contractVersion: 2 });
 
   assert.equal(result.valid, false);
-  assert.ok(violationPaths(result).includes("/contractVersion"));
+  assert.ok(violationMessages(result).some((message) => message.startsWith("/contractVersion")));
 });

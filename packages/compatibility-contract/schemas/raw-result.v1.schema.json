@@ -14,6 +14,7 @@
     "startedAt",
     "finishedAt",
     "outcome",
+    "javascriptApiLevel",
     "capabilityOwner",
     "explicitFallbacks"
   ],
@@ -44,6 +45,10 @@
     "outcome": {
       "description": "The correctness result. It is required, so a run that only produced timings cannot be filed as evidence.",
       "enum": ["pass", "fail"]
+    },
+    "javascriptApiLevel": {
+      "description": "The JavaScript API level this run actually exercised and the subject supported for it. It can be lower than the level the corpus entry declares — an entry declared at C1 measured against a subject that only supports C0 records C0 here — so the level a result was obtained at is never inferred from the corpus.",
+      "enum": ["C0", "C1", "C2", "C3"]
     },
     "firstIncompatibleBehavior": {
       "$ref": "#/$defs/firstIncompatibleBehavior"

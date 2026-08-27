@@ -14,7 +14,10 @@
     "arch": "x64",
     "runnerImage": "ubuntu-24.04",
     "nodeVersion": "24.20.0",
-    "packageManager": { "name": "pnpm", "version": "11.20.0" }
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.20.0"
+    }
   },
   "command": {
     "argv": ["pnpm", "test-serve", "playground/css"],
@@ -24,6 +27,7 @@
   "startedAt": "2026-08-27T09:10:00.000Z",
   "finishedAt": "2026-08-27T09:12:03.000Z",
   "outcome": "fail",
+  "javascriptApiLevel": "C0",
   "firstIncompatibleBehavior": {
     "phase": "test",
     "message": "css url() asset was not rewritten to the served asset path",

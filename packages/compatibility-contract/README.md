@@ -36,8 +36,12 @@ The schemas encode the rules the compatibility record already commits to, so a m
 fails at load time rather than producing evidence that cannot be interpreted:
 
 - A source pinned to a branch or tag instead of a full commit SHA, or vendored without its license.
-- A result without a correctness outcome, or without the capability owner that a Rust-first claim
-  depends on. `explicitFallbacks` is required as well: an empty array asserts there were none.
+- A result without a correctness outcome, without the capability owner that a Rust-first claim
+  depends on, or without the JavaScript API level the run was measured at. `explicitFallbacks` is
+  required as well: an empty array asserts there were none.
+- A result whose API level is inferred rather than recorded. The level belongs on the result, not
+  only on the entry: one corpus entry produces a Vite baseline result and an rsvite result that can
+  sit at different levels.
 - A failing result that does not name the first incompatible behavior and classify the failure.
 - An HMR check whose sentinel is stored rather than held in memory, or that does not treat a
   main-frame navigation as a failure. Persisted state survives a reload and cannot prove an update.

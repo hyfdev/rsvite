@@ -1,18 +1,31 @@
 {
   "contractVersion": 1,
-  "manifestEntry": { "id": "drawdb", "sourceCommit": "v1.2.3" },
-  "subject": { "name": "vite", "version": "7.1.3" },
+  "manifestEntry": {
+    "id": "drawdb",
+    "sourceCommit": "v1.2.3"
+  },
+  "subject": {
+    "name": "vite",
+    "version": "7.1.3"
+  },
   "environment": {
     "os": "linux",
     "arch": "x64",
     "runnerImage": "ubuntu-24.04",
     "nodeVersion": "24.20.0",
-    "packageManager": { "name": "npm", "version": "10.9.2" }
+    "packageManager": {
+      "name": "npm",
+      "version": "10.9.2"
+    }
   },
-  "command": { "argv": ["npm", "run", "dev"], "exitCode": 0 },
+  "command": {
+    "argv": ["npm", "run", "dev"],
+    "exitCode": 0
+  },
   "startedAt": "2026-08-27T09:00:00.000Z",
   "finishedAt": "2026-08-27T09:01:00.000Z",
   "outcome": "pass",
+  "javascriptApiLevel": "C0",
   "capabilityOwner": "compatibility-javascript",
   "explicitFallbacks": []
 }

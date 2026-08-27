@@ -25,6 +25,6 @@
   "startedAt": "2026-08-27T09:00:00.000Z",
   "finishedAt": "2026-08-27T09:01:00.000Z",
   "outcome": "pass",
-  "javascriptApiLevel": "C0",
-  "explicitFallbacks": []
+  "explicitFallbacks": [],
+  "capabilityOwner": "rust"
 }
