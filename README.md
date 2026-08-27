@@ -1,7 +1,9 @@
 # rsvite
 
-rsvite is a project to implement Vite in Rust while retaining practical compatibility with the JavaScript ecosystem.
+rsvite is a Rust implementation of Vite for existing Vite projects. Users start it through Node.js and npm; Node enters the Rust core through `napi-rs`, while JavaScript remains available for the configuration, plugins, and runtime behavior that must execute in JavaScript.
 
-The runtime process model, compatibility boundary, and first implementation milestone are open.
+No development path is implemented yet. The repository currently provides the product records and the shared Rust/JavaScript workspace scaffold.
 
-See the Project Context Records for [intent](.agents/docs/intent.md) and [architecture](.agents/docs/architecture.md).
+Compatibility is measured against pinned Vite upstream E2E tests and pinned real projects. The current milestones establish that evidence and then build the first Node-started Rust development path.
+
+See the [Project Context Records](.agents/docs/README.md) for the product intent, architecture boundaries, compatibility rules, and current roadmap.
