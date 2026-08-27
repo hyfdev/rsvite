@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,28 @@ function claimingHmr(manifest: unknown): unknown {
   };
   document.entries[0]!.expectedCapabilities = ["html", "hmr-without-full-reload"];
   return document;
+}
+
+/** Runs a probe in its own process, because it patches `node:fs` before loading the runner. */
+async function runProbe(
+  name: string,
+  args: readonly string[] = [],
+): Promise<Record<string, unknown>> {
+  const probe = fileURLToPath(new URL(`./${name}`, import.meta.url));
+  const finished = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+    (resolve) => {
+      const child = spawn(process.execPath, ["--experimental-strip-types", probe, ...args], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
+      child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")));
+      child.once("close", (code) => resolve({ code, stdout, stderr }));
+    },
+  );
+  assert.equal(finished.code, 0, `the probe did not finish cleanly: ${finished.stderr}`);
+  return JSON.parse(finished.stdout.trim()) as Record<string, unknown>;
 }
 
 async function isAlive(pid: number): Promise<boolean> {
@@ -1037,26 +1059,31 @@ test("an external termination is not hidden by a host that was too busy to notic
   assert.match(failure.message, /ended on its own/);
 });
 
-test("the result names evidence that has settled, not evidence still being written", async () => {
-  const request = await baseRequest("rsvite");
-  const manifest = structuredClone(syntheticManifest()) as {
-    entries: { commands: Record<string, { argv: string[] }> }[];
-  };
-  manifest.entries[0]!.commands["install"] = { argv: ["definitely-not-a-real-executable-xyz"] };
+test("a result never names evidence a slow filesystem has not written yet", async () => {
+  // The probe runs in a subprocess because it replaces `node:fs` before the runner is loaded,
+  // so that every log file appears 250 ms after its stream is ended. A runner that reads the
+  // directory before its own streams have closed returns a result naming nothing at all.
+  const observed = await runProbe("delayed-log-probe.mts");
 
-  const report = await runCompatibilityCheck({ ...request, manifest });
-  // Snapshot the moment the call returns: nothing the runner owns may appear afterwards, or
-  // the result was assembled from a directory that was still being written into.
-  const atReturn = readdirSync(request.artifactRoot).sort();
-  await delay(500);
-  const later = readdirSync(request.artifactRoot).sort();
+  assert.deepEqual(observed["artifactPaths"], ["install.stdout.log", "install.stderr.log"]);
+  assert.equal(observed["evidencePath"], "install.stderr.log");
+});
 
-  assert.deepEqual(later, atReturn, "a runner-owned file appeared after the result was returned");
-  const result = report.result as Record<string, unknown>;
-  const artifactPaths = result["artifactPaths"] as string[];
-  const failure = result["firstIncompatibleBehavior"] as { evidencePath: string };
+test("a process the kernel reports as dead rather than zombie is still not our doing", async () => {
+  // `Z` is the common record for a finished process, but `X` and `x` mean Dead just as surely.
+  // Reading only the first lets the others be misread as a process that was still running.
+  const observed = await runProbe("dead-state-probe.mts");
+  const failure = observed["failure"] as { phase: string; message: string };
 
-  assert.ok(artifactPaths.includes("install.stderr.log"), "the spawn error's log was not listed");
-  assert.equal(failure.evidencePath, "install.stderr.log");
-  assert.match(readFileSync(join(request.artifactRoot, failure.evidencePath), "utf8"), /ENOENT/);
+  assert.equal(observed["outcome"], "fail", "a dead process was credited to the runner's stop");
+  assert.equal(failure.phase, "dev");
+  assert.match(failure.message, /ended on its own/);
+});
+
+test("a log the runner cannot write fails the run instead of thinning the evidence", async () => {
+  const observed = await runProbe("delayed-log-probe.mts", ["fail"]);
+
+  assert.equal(observed["rejected"], true, "a result was returned for a run with no usable log");
+  assert.match(String(observed["message"]), /could not write .*install\.stderr\.log/);
+  assert.equal(observed["wroteResult"], false, "a result was written despite the failed log");
 });

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createWriteStream, readFileSync } from "node:fs";
+import { createWriteStream, readFileSync, type WriteStream } from "node:fs";
 import { once } from "node:events";
 import { sleep, timer } from "./deadline.ts";
 
@@ -77,7 +77,10 @@ function livenessOf(pid: number | undefined): "running" | "ended" | "unknown" {
     const stat = readFileSync(`/proc/${String(pid)}/stat`, "utf8");
     // The state letter follows the executable name, which may itself contain spaces.
     const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
-    return state === "Z" ? "ended" : "running";
+    // `Z` is a zombie and `X`/`x` are dead, per proc_pid_stat(5). All three mean the process
+    // has finished; only the first is the common case, and reading just it would let the
+    // others be misread as a process that was still running.
+    return state === "Z" || state === "X" || state === "x" ? "ended" : "running";
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "ENOENT" ? "ended" : "unknown";
   }
@@ -174,6 +177,16 @@ async function terminateGroup(pgid: number): Promise<{ alreadyGone: boolean }> {
   throw new Error(`process group ${String(pgid)} survived SIGKILL`);
 }
 
+/** Resolves when the stream is closed, and rejects if writing it failed. */
+function closedOrFailed(stream: WriteStream, path: string | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    stream.once("close", resolve);
+    stream.once("error", (error: Error) => {
+      reject(new Error(`the runner could not write ${path ?? "its log"}: ${String(error)}`));
+    });
+  });
+}
+
 interface Capture {
   stdout: string;
   stderr: string;
@@ -206,14 +219,22 @@ function capture(
     streams?.stderr.write(chunk);
   });
 
+  // A log that could not be written is not evidence that happens to be missing: the run has
+  // no record to point at, so it fails rather than returning a result with a gap in it.
   const flushed =
     streams === undefined
       ? Promise.resolve()
-      : Promise.all([once(streams.stdout, "close"), once(streams.stderr, "close")])
-          .then(() => undefined)
-          .catch(() => undefined);
+      : Promise.all([
+          closedOrFailed(streams.stdout, logPaths?.stdout),
+          closedOrFailed(streams.stderr, logPaths?.stderr),
+        ]).then(() => undefined);
 
+  // `close` and `error` can both fire for one command, and ending a stream twice would end
+  // a stream someone else may already have replaced.
+  let ended = false;
   const endStreams = (): void => {
+    if (ended) return;
+    ended = true;
     streams?.stdout.end();
     streams?.stderr.end();
   };
