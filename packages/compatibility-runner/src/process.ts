@@ -16,19 +16,22 @@ export interface CommandOutcome {
   readonly timedOut: boolean;
   readonly stdout: string;
   readonly stderr: string;
+  /**
+   * The command never started. Reporting this as exit code `null` would describe a process that
+   * ran and told us nothing, which is a different fact from an executable that does not exist.
+   */
+  readonly startError?: string;
 }
 
 export interface StartedCommand {
   /** Resolves once no process in the group is left, not merely once the leader closed. */
   stop(): Promise<CommandOutcome>;
   /**
-   * The leader closed on its own, before `stop` asked it to. A long-running command that ends
-   * by itself after reporting readiness has not been stopped — it has failed, and the run has
-   * to notice the difference.
+   * The leader was already gone when `stop` was called. Decided by asking the operating system,
+   * not by whether Node has delivered `close` yet: a process killed during acceptance is dead
+   * long before its event arrives, and treating that as "we stopped it" hides the failure.
    */
   exitedOnItsOwn(): boolean;
-  /** The exit code seen so far, for a command that ended without being stopped. */
-  exitCodeSoFar(): number | null;
   /** Everything written so far, for readiness detection while the process runs. */
   readStdout(): string;
   readStderr(): string;
@@ -57,6 +60,17 @@ function signalGroup(pgid: number, signal: NodeJS.Signals | 0): boolean {
   } catch (error) {
     // ESRCH means the group is gone, which is the state the caller wanted. EPERM means
     // something in it still exists but is not ours to signal, so the group is not gone.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** True while this exact process still exists, regardless of what Node has delivered. */
+function processExists(pid: number | undefined): boolean {
+  if (pid === undefined) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
@@ -123,7 +137,11 @@ interface Capture {
   stderr: string;
 }
 
-function capture(child: ChildProcess, logPaths?: { stdout: string; stderr: string }): Capture {
+function capture(
+  child: ChildProcess,
+  logPaths: { stdout: string; stderr: string } | undefined,
+  onSpawnError: (message: string) => void,
+): Capture {
   // Streams are closed on `error` as well as on `close`; a command that never started still
   // opened its log files.
   const buffers: Capture = { stdout: "", stderr: "" };
@@ -139,12 +157,23 @@ function capture(child: ChildProcess, logPaths?: { stdout: string; stderr: strin
     buffers.stderr += chunk.toString("utf8");
     streams?.stderr.write(chunk);
   });
+
   const endStreams = (): void => {
     streams?.stdout.end();
     streams?.stderr.end();
   };
   child.once("close", endStreams);
-  child.once("error", endStreams);
+  // The spawn error is written through the same stream the result will point at, and only then
+  // is that stream ended. Evidence naming a file that turned out to be empty is worse than
+  // naming no evidence at all.
+  // Recorded and written here, in the first listener attached to `error`. Node emits `error`
+  // before `close`, so anything that waits for `close` already sees the reason by then.
+  child.once("error", (error: Error) => {
+    const message = String(error);
+    onSpawnError(message);
+    streams?.stderr.write(`${message}\n`);
+    endStreams();
+  });
   return buffers;
 }
 
@@ -154,12 +183,15 @@ export function startCommand(
   logPaths?: { stdout: string; stderr: string },
 ): StartedCommand {
   const child = spawnGroup(command);
-  const buffers = capture(child, logPaths);
+  const state: { startError?: string } = {};
+  const buffers = capture(child, logPaths, (message) => {
+    state.startError = message;
+  });
 
   let exitCode: number | null = null;
   let signal: NodeJS.Signals | null = null;
   let closed = false;
-  let stopping = false;
+  let endedBeforeStop = false;
 
   // Attached before anything can throw. A command that cannot spawn emits `error`, and an
   // unhandled `error` on a ChildProcess terminates the host — a missing executable is a
@@ -189,13 +221,22 @@ export function startCommand(
     readStdout: () => buffers.stdout,
     readStderr: () => buffers.stderr,
     exited,
-    exitedOnItsOwn: () => closed && !stopping,
-    exitCodeSoFar: () => exitCode,
+    exitedOnItsOwn: () => endedBeforeStop,
     async stop(): Promise<CommandOutcome> {
-      stopping = true;
+      // Asked before anything is signalled, and of the operating system rather than of Node's
+      // event queue: `close` for a process that died during acceptance can arrive after this.
+      endedBeforeStop = closed || (pgid !== undefined && !processExists(child.pid));
       if (pgid !== undefined) await terminateGroup(pgid);
-      await Promise.race([exited, sleep(0)]);
-      return { exitCode, signal, timedOut: false, stdout: buffers.stdout, stderr: buffers.stderr };
+      // The leader's own outcome, not merely the group's absence.
+      await exited;
+      return {
+        exitCode,
+        signal,
+        timedOut: false,
+        stdout: buffers.stdout,
+        stderr: buffers.stderr,
+        ...(state.startError === undefined ? {} : { startError: state.startError }),
+      };
     },
   };
 }

@@ -62,6 +62,8 @@ export interface Deadline {
   /** Milliseconds left, never below zero. */
   remaining(): number;
   expired(): boolean;
+  /** Ends the budget early, for a reason the clock cannot know about. */
+  abort(reason: Error): void;
   /** Releases the timer. A deadline that is not disposed keeps the host alive until it fires. */
   dispose(): void;
 }
@@ -90,7 +92,11 @@ export function deadline(ms: number, parent?: AbortSignal): Deadline {
   return {
     signal: controller.signal,
     remaining: () => Math.max(0, expiresAt - Date.now()),
-    expired: () => controller.signal.aborted,
+    // The clock, not the timer callback. Work that blocks the event loop past the budget and
+    // then resolves would otherwise deliver its microtask before the delayed timer ever ran,
+    // and a run that took 600ms under a 100ms budget would be reported as a pass.
+    expired: () => controller.signal.aborted || Date.now() >= expiresAt,
+    abort: (reason) => controller.abort(reason),
     dispose() {
       clearTimeout(timer);
       parent?.removeEventListener("abort", onParentAbort);
@@ -123,7 +129,11 @@ export async function runUnder<T>(
   what: string,
   cleanupMs: number,
 ): Promise<Bounded<T>> {
-  const settled = start(bound.signal).then(
+  // The callback may throw before it returns a Promise; a function that satisfies the interface
+  // is still allowed to fail synchronously, and that has to become the same classified failure
+  // as a rejection rather than escaping the wrapper.
+  const invoked = (async () => start(bound.signal))();
+  const settled = invoked.then(
     (value) => ({ ok: true as const, value }),
     (error: unknown) => ({ ok: false as const, reason: `${what} failed: ${String(error)}` }),
   );
@@ -137,7 +147,13 @@ export async function runUnder<T>(
   });
 
   const first = await Promise.race([settled, expiry]);
-  if (first !== "expired") return first;
+  if (first !== "expired") {
+    // Settling is not the same as being on time. Synchronous work cannot be preempted, so the
+    // only honest check is whether the budget had already passed by the time it finished.
+    if (!bound.expired()) return first;
+    const reason = `${what} did not finish within its deadline`;
+    return first.ok ? { ok: false, reason, late: first.value } : { ok: false, reason };
+  }
 
   const grace = timer(cleanupMs, "abandoned" as const);
   let outcome: Awaited<typeof settled> | "abandoned";

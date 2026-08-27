@@ -539,5 +539,193 @@ test("a lifecycle process that exits cleanly after readiness is still a failure"
     "fail",
     "a server that vanished mid-acceptance was recorded as usable",
   );
-  assert.match(failure.message, /exited on its own after reporting readiness/);
+  assert.match(failure.message, /ended on its own/);
+});
+
+test("a process killed during acceptance is not mistaken for one the runner stopped", async () => {
+  const port = await freePort();
+  const browser = createSyntheticBrowser({
+    documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
+  });
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser,
+    // Kills the lifecycle process and returns at once, so its `close` event arrives while the
+    // runner is already stopping. Asking Node's event queue would call this "we stopped it".
+    update: () => {
+      const pid = Number(readFileSync(join(request.artifactRoot, "server.pid"), "utf8"));
+      process.kill(pid, "SIGKILL");
+      return Promise.resolve();
+    },
+  });
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
+  };
+  manifest.entries[0]!.commands["dev"] = {
+    argv: [process.execPath, fixture("serve.mjs")],
+    env: { PORT: String(port), PID_FILE: join(request.artifactRoot, "server.pid") },
+  };
+
+  const report = await runCompatibilityCheck({ ...request, manifest });
+  const result = report.result as Record<string, unknown>;
+
+  assert.equal(result["outcome"], "fail", "a process killed mid-acceptance was recorded as a pass");
+});
+
+test("an early exit outranks a later browser failure", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser: createSyntheticBrowser({ hangUntilAborted: "open" }),
+    timeouts: { installMs: 10_000, lifecycleMs: 30_000, browserMs: 2_000 },
+  });
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
+  };
+  manifest.entries[0]!.commands["dev"] = {
+    argv: [process.execPath, fixture("flaky-server.mjs")],
+    env: { PORT: String(port), EXIT_AFTER_MS: "100", EXIT_CODE: "7" },
+  };
+
+  const report = await runCompatibilityCheck({ ...request, manifest });
+  const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as { message: string };
+
+  // The exit happened at 100 ms; the browser budget would not have expired until 2,000 ms.
+  assert.match(failure.message, /ended on its own/);
+});
+
+test("an error reported during the final sentinel read is not lost", async () => {
+  const port = await freePort();
+  const browser = createSyntheticBrowser({
+    documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
+  });
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser,
+    update: () => {
+      // Emitted so that it is queued when the final sentinel read drains events.
+      browser
+        .lastPage()
+        ?.emit({ type: "console-error", message: "error during final sentinel read" });
+      return Promise.resolve();
+    },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const result = report.result as Record<string, unknown>;
+
+  assert.equal(result["outcome"], "fail", "an error emitted in the update window was dropped");
+  assert.deepEqual(result["browserErrors"], [
+    { type: "console-error", message: "error during final sentinel read" },
+  ]);
+});
+
+test("inside the update window the earlier event decides the first failure", async () => {
+  const port = await freePort();
+  const browser = createSyntheticBrowser({
+    documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
+  });
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser,
+    update: () => {
+      const page = browser.lastPage();
+      page?.emit({ type: "console-error", message: "error before the reload" });
+      page?.navigate(`http://127.0.0.1:${String(port)}/`);
+      return Promise.resolve();
+    },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const failure = (report.result as Record<string, unknown>)["firstIncompatibleBehavior"] as {
+    message: string;
+  };
+
+  assert.match(failure.message, /console-error: error before the reload/);
+});
+
+test("a failed spawn records the real error in the evidence the result names", async () => {
+  const request = await baseRequest("rsvite");
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: { commands: Record<string, { argv: string[] }> }[];
+  };
+  manifest.entries[0]!.commands["install"] = { argv: ["definitely-not-a-real-executable-xyz"] };
+
+  const report = await runCompatibilityCheck({ ...request, manifest });
+  const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as { message: string; evidencePath: string };
+
+  assert.equal(result["outcome"], "fail");
+  assert.match(failure.message, /ENOENT|could not start/);
+  const evidence = readFileSync(join(request.artifactRoot, failure.evidencePath), "utf8");
+  assert.match(
+    evidence,
+    /ENOENT/,
+    "the evidence file the result names does not contain the failure",
+  );
+});
+
+test("work that overran its budget while blocking the loop is not a pass", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser: {
+      open: () => {
+        // Synchronous work cannot be preempted, so the timer callback never runs in time.
+        const until = Date.now() + 400;
+        while (Date.now() < until) {
+          /* block */
+        }
+        return Promise.resolve({
+          evaluate: () => Promise.resolve(undefined),
+          drainEvents: () => [],
+          close: () => Promise.resolve(),
+        });
+      },
+    },
+    timeouts: { installMs: 10_000, lifecycleMs: 30_000, browserMs: 100 },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const result = report.result as Record<string, unknown>;
+
+  assert.equal(
+    result["outcome"],
+    "fail",
+    "work that finished after its budget was recorded as a pass",
+  );
+});
+
+test("an adapter that throws synchronously becomes a classified browser failure", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser: {
+      open: () => {
+        throw new Error("synchronous adapter failure");
+      },
+    },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const failure = (report.result as Record<string, unknown>)["firstIncompatibleBehavior"] as {
+    phase: string;
+    message: string;
+  };
+
+  assert.equal(failure.phase, "browser");
+  assert.match(failure.message, /synchronous adapter failure/);
 });

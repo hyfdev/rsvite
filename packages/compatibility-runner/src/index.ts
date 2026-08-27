@@ -3,7 +3,6 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { createContractValidators } from "@rsvite/compatibility-contract";
 import {
-  judgeUpdateWindow,
   normalizeEvents,
   type BrowserAdapter,
   type BrowserEvent,
@@ -137,6 +136,9 @@ function inProject(command: CommandSpec, projectRoot: string): CommandSpec {
 }
 
 function describeExit(outcome: CommandOutcome, label: string): string | undefined {
+  // A command that never started did not exit with an unknown code; it failed to start, and
+  // the reason is the only useful thing the record can carry.
+  if (outcome.startError !== undefined) return `${label} could not start: ${outcome.startError}`;
   if (outcome.timedOut) return `${label} did not finish within its timeout`;
   if (outcome.exitCode !== 0) {
     return `${label} exited with code ${String(outcome.exitCode)}${
@@ -223,12 +225,10 @@ export async function runCompatibilityCheck(request: RunRequest): Promise<RunRep
   let failure: RunFailure | undefined;
   let lifecycleOutcome: CommandOutcome;
 
-  let exitedDuringAcceptance = false;
   try {
     const observed = await lifecyclePhase(request, entry, started, lifecycleBound);
     events = observed.events;
     failure = observed.failure;
-    exitedDuringAcceptance = started.exitedOnItsOwn();
   } finally {
     lifecycleBound.dispose();
     lifecycleOutcome = await started.stop();
@@ -238,13 +238,15 @@ export async function runCompatibilityCheck(request: RunRequest): Promise<RunRep
     // Only `process-exit` readiness defines the command ending as normal completion, and even
     // then a nonzero code fails. Under HTTP or stdout readiness the command is supposed to keep
     // serving through acceptance, so ending at all is a failure — a dev server that reports
-    // ready and then exits cleanly is not a server anything was measured against.
+    // ready and then exits cleanly is not a server anything was measured against. Whether it
+    // ended by itself is decided by `stop`, which asks the operating system rather than waiting
+    // for an event that can arrive later than the answer.
     const exitProblem =
       entry.readiness.type === "process-exit"
         ? describeExit(lifecycleOutcome, request.lifecycle)
-        : exitedDuringAcceptance
+        : started.exitedOnItsOwn()
           ? (describeExit(lifecycleOutcome, request.lifecycle) ??
-            `${request.lifecycle} exited on its own after reporting readiness`)
+            `${request.lifecycle} ended on its own after reporting readiness`)
           : undefined;
     if (exitProblem !== undefined) failure = { phase: request.lifecycle, message: exitProblem };
   }
@@ -305,7 +307,31 @@ async function lifecyclePhase(
   }
   if (request.browser === undefined) return { events: [] };
 
-  const observed = await observeBrowser(request, entry, lifecycleBound);
+  // The command's own death competes with acceptance instead of being sampled after it. A
+  // server that vanishes 100ms in must not lose first place to a browser deadline at 500ms.
+  const acceptance = deadline(lifecycleBound.remaining(), lifecycleBound.signal);
+  let vanished = false;
+  void started.exited.then(() => {
+    vanished = true;
+    acceptance.abort(new Error("the lifecycle command ended during acceptance"));
+  });
+
+  let observed: Observed;
+  try {
+    observed = await observeBrowser(request, entry, acceptance);
+  } finally {
+    acceptance.dispose();
+  }
+
+  if (vanished && entry.readiness.type !== "process-exit") {
+    return {
+      events: observed.events,
+      failure: {
+        phase: request.lifecycle,
+        message: `${request.lifecycle} ended on its own during browser acceptance`,
+      },
+    };
+  }
   if (observed.failure === undefined && lifecycleBound.expired()) {
     return {
       events: observed.events,
@@ -410,22 +436,40 @@ async function observeBrowser(
         );
         if (!updated.ok) return { events, failure: { phase: "browser", message: updated.reason } };
 
+        // Drained after every awaited page operation, the final sentinel read included: an
+        // error the page reported while answering that last read used to stay in the adapter's
+        // queue and vanish from the record entirely.
         const windowEvents = page.drainEvents();
-        events.push(...windowEvents);
         const after = await readSentinel(page, expression, browserBound);
+        windowEvents.push(...page.drainEvents());
+        events.push(...windowEvents);
         if (!after.ok) return { events, failure: { phase: "browser", message: after.reason } };
 
-        const verdict = judgeUpdateWindow({
-          sentinelBefore: before.value,
-          sentinelAfter: after.value,
-          events: windowEvents,
-        });
-        if (verdict.fullReload) {
+        // One ordered stream decides which incompatibility came first. A navigation wins only
+        // when it was observed before an error, and a lost sentinel is observed last of all,
+        // because it is only knowable once the final read has happened.
+        const decisive = windowEvents.find(
+          (event) => event.type === "main-frame-navigated" || isErrorEvent(event),
+        );
+        if (decisive?.type === "main-frame-navigated") {
           return {
             events,
             failure: {
               phase: "browser",
-              message: `the update was a full reload: ${verdict.reason ?? "no reason given"}`,
+              message: `the update was a full reload: the main frame navigated to ${decisive.url} during the update window`,
+            },
+          };
+        }
+        if (decisive !== undefined) {
+          return { events, failure: firstBrowserError([decisive]) };
+        }
+        if (!Object.is(before.value, after.value)) {
+          return {
+            events,
+            failure: {
+              phase: "browser",
+              message:
+                "the update was a full reload: the in-memory sentinel did not survive the update, so the document was replaced",
             },
           };
         }
@@ -446,6 +490,10 @@ async function observeBrowser(
   } finally {
     browserBound.dispose();
   }
+}
+
+function isErrorEvent(event: BrowserEvent): boolean {
+  return event.type !== "main-frame-navigated";
 }
 
 function firstBrowserError(events: readonly BrowserEvent[]): RunFailure | undefined {
