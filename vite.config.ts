@@ -2,7 +2,7 @@ import { defineConfig } from "vite-plus";
 
 export default defineConfig({
   fmt: {
-    ignorePatterns: ["corpus/vite-upstream"],
+    ignorePatterns: ["corpus/vite-upstream", "packages/compatibility-vite-upstream/tests/fixtures"],
     overrides: [
       {
         files: ["**/*.md"],
@@ -11,7 +11,7 @@ export default defineConfig({
     ],
   },
   lint: {
-    ignorePatterns: ["corpus/vite-upstream"],
+    ignorePatterns: ["corpus/vite-upstream", "packages/compatibility-vite-upstream/tests/fixtures"],
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
     rules: {
       "unicorn/prefer-node-protocol": "error",

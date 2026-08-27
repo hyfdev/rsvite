@@ -1,4 +1,9 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "vite-plus/test";
 import {
   HTML_PRESERVE_COMMENTS_ENTRY_ID,
@@ -9,7 +14,11 @@ import {
   readCorpusManifest,
   readProvenance,
   validateCorpusManifestDocument,
+  vitestTestNamePattern,
 } from "../src/index.ts";
+
+const require = createRequire(import.meta.url);
+const testsDir = dirname(fileURLToPath(import.meta.url));
 
 function asRecord(value: unknown): Record<string, unknown> {
   assert.equal(typeof value, "object");
@@ -120,22 +129,66 @@ test("the corpus manifest is accepted by the canonical validator", () => {
   assert.equal(htmlPreserveCommentsAdapter.importedRoot, "playground/html");
 });
 
-test("the corpus test command selects the extension testName", () => {
+function corpusTestCommand(): string[] {
   const manifest = readCorpusManifest();
   const entry = asRecord((asRecord(manifest)["entries"] as unknown[])[0]!);
   const argv = asRecord(asRecord(entry["commands"])["test"])["argv"];
   assert.ok(Array.isArray(argv));
-  const command = argv.map((part) => {
+  return argv.map((part) => {
     assert.equal(typeof part, "string");
     return part as string;
   });
+}
 
+test("the corpus test command selects the extension testName", () => {
+  const command = corpusTestCommand();
   const testName = htmlPreserveCommentsAdapter.testName;
   assert.equal(testName, "main > preserve comments");
   const patternFlag = command.indexOf("--testNamePattern");
   assert.ok(patternFlag >= 0, "the Vite test-serve command must pass --testNamePattern");
-  assert.equal(command[patternFlag + 1], testName);
+  assert.equal(command[patternFlag + 1], vitestTestNamePattern(testName));
   assert.equal(command[0], "pnpm");
   assert.equal(command[1], "test-serve");
   assert.ok(command.includes(htmlPreserveCommentsAdapter.importedRoot));
+  assert.ok(
+    !command.includes("--"),
+    "a lone -- makes Vitest treat the filter as a positional path",
+  );
+});
+
+test("Vitest 4.1.11 selects only the full test name when the corpus argv has no lone --", () => {
+  const command = corpusTestCommand();
+  const testName = htmlPreserveCommentsAdapter.testName;
+  const fixtureDir = join(testsDir, "fixtures");
+  const vitestArgs = command
+    .slice(command.indexOf("test-serve") + 1)
+    .map((part) =>
+      part === htmlPreserveCommentsAdapter.importedRoot ? "html-filter-probe.spec.ts" : part,
+    );
+
+  const vitestPkgPath = require.resolve("vitest/package.json");
+  const vitestPkg = JSON.parse(readFileSync(vitestPkgPath, "utf8")) as {
+    version: string;
+    bin?: string | { vitest?: string };
+  };
+  assert.equal(vitestPkg.version, "4.1.11");
+  const vitestRoot = dirname(vitestPkgPath);
+  const binRel =
+    typeof vitestPkg.bin === "string" ? vitestPkg.bin : (vitestPkg.bin?.vitest ?? "vitest.mjs");
+  const vitestBin = join(vitestRoot, binRel);
+
+  const probe = spawnSync(
+    process.execPath,
+    [vitestBin, "run", "--config", join(fixtureDir, "vitest.config.ts"), ...vitestArgs],
+    {
+      encoding: "utf8",
+      cwd: fixtureDir,
+      env: { ...process.env, NO_COLOR: "1" },
+    },
+  );
+  const output = `${probe.stdout}\n${probe.stderr}`;
+  assert.equal(probe.status, 0, `focused Vitest command failed:\n${output}`);
+  assert.match(output, /1 passed/);
+  assert.match(output, /1 skipped/);
+  assert.equal(command[command.indexOf("--testNamePattern") + 1], vitestTestNamePattern(testName));
 });

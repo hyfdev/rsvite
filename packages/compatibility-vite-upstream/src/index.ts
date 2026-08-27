@@ -148,6 +148,11 @@ function requiredString(value: unknown, path: string): string {
   return value;
 }
 
+/** Vitest 4.1.11 matches `getTaskFullName`, which joins suite and test names with spaces, not ` > `. */
+export function vitestTestNamePattern(fullName: string): string {
+  return fullName.replaceAll(" > ", " ");
+}
+
 /** Paths are relative to the vendored copy. */
 export function adapterEntryFromManifest(manifest: unknown = readCorpusManifest()) {
   const entries = asRecord(manifest)?.["entries"];

@@ -28,9 +28,8 @@
             "pnpm",
             "test-serve",
             "playground/html",
-            "--",
             "--testNamePattern",
-            "main > preserve comments"
+            "main preserve comments"
           ]
         }
       },
