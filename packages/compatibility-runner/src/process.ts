@@ -32,6 +32,8 @@ export interface StartedCommand {
    * long before its event arrives, and treating that as "we stopped it" hides the failure.
    */
   exitedOnItsOwn(): boolean;
+  /** The reason the command never started, if that is what happened. */
+  startErrorSoFar(): string | undefined;
   /** Everything written so far, for readiness detection while the process runs. */
   readStdout(): string;
   readStderr(): string;
@@ -219,6 +221,7 @@ export function startCommand(
     readStderr: () => buffers.stderr,
     exited,
     exitedOnItsOwn: () => endedBeforeStop,
+    startErrorSoFar: () => state.startError,
     async stop(): Promise<CommandOutcome> {
       // Whether the command was already over when the stop began. Asking the operating system
       // whether the process still exists cannot answer this: a kill is asynchronous, so a

@@ -110,6 +110,12 @@ export type Bounded<T> =
       readonly ok: false;
       readonly reason: string;
       /**
+       * The deadline ended it, rather than the work failing on its own. A timeout is decided by
+       * the clock at the moment it passes; an ordinary rejection happened after whatever the
+       * work had already reported, and the two rank differently against other evidence.
+       */
+      readonly timedOut?: boolean;
+      /**
        * A value the work produced after its deadline passed. The operation obeyed the contract
        * and settled on abort, so whatever it produced still needs releasing — dropping it is
        * how a browser page survives the run that gave up on it.
@@ -152,7 +158,9 @@ export async function runUnder<T>(
     // only honest check is whether the budget had already passed by the time it finished.
     if (!bound.expired()) return first;
     const reason = `${what} did not finish within its deadline`;
-    return first.ok ? { ok: false, reason, late: first.value } : { ok: false, reason };
+    return first.ok
+      ? { ok: false, reason, timedOut: true, late: first.value }
+      : { ok: false, reason, timedOut: true };
   }
 
   const grace = timer(cleanupMs, "abandoned" as const);
@@ -167,5 +175,7 @@ export async function runUnder<T>(
   const reason = `${what} did not finish within its deadline`;
   // The work obeyed the contract and produced something after the deadline. Handing it back is
   // what lets the caller release it; dropping it is how a browser page survives the run.
-  return outcome.ok ? { ok: false, reason, late: outcome.value } : { ok: false, reason };
+  return outcome.ok
+    ? { ok: false, reason, timedOut: true, late: outcome.value }
+    : { ok: false, reason, timedOut: true };
 }

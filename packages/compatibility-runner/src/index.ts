@@ -301,11 +301,17 @@ async function lifecyclePhase(
     };
   }
   if (!readiness.ready) {
+    // A command that never started did not fail to become ready; it failed to exist. Saying
+    // "readiness was not reached" would send a reader looking for a server that was never run.
+    const startError = started.startErrorSoFar();
     return {
       events: [],
       failure: {
         phase: request.lifecycle,
-        message: readiness.reason ?? "readiness was not reached",
+        message:
+          startError === undefined
+            ? (readiness.reason ?? "readiness was not reached")
+            : `${request.lifecycle} could not start: ${startError}`,
       },
     };
   }
@@ -413,10 +419,7 @@ async function observeBrowser(
     if (!opened.ok) {
       // The adapter may have obeyed the contract and produced the page just after the abort.
       if (opened.late !== undefined) await closeOrFail(opened.late);
-      return {
-        events: [],
-        failure: { phase: "browser", message: opened.reason, fromDeadline: true },
-      };
+      return { events: [], failure: earlierOf([], opened) };
     }
 
     const page = opened.value;
@@ -425,7 +428,7 @@ async function observeBrowser(
       const expression = acceptance.hmr?.sentinelExpression;
       const before = await readSentinel(page, expression, browserBound);
       events.push(...page.drainEvents());
-      if (!before.ok) return { events, failure: earlierOf(events, before.reason) };
+      if (!before.ok) return { events, failure: earlierOf(events, before) };
 
       // Checked here, before the update, so an error the page reported on load is the first
       // incompatible behavior rather than whatever the update happens to produce later.
@@ -456,32 +459,19 @@ async function observeBrowser(
         const windowEvents = page.drainEvents();
         if (!updated.ok) {
           events.push(...windowEvents);
-          return { events, failure: earlierOf(windowEvents, updated.reason) };
+          return { events, failure: earlierOf(windowEvents, updated) };
         }
 
         const after = await readSentinel(page, expression, browserBound);
         windowEvents.push(...page.drainEvents());
         events.push(...windowEvents);
-        if (!after.ok) return { events, failure: earlierOf(windowEvents, after.reason) };
+        if (!after.ok) return { events, failure: earlierOf(windowEvents, after) };
 
         // One ordered stream decides which incompatibility came first. A navigation wins only
         // when it was observed before an error, and a lost sentinel is observed last of all,
         // because it is only knowable once the final read has happened.
-        const decisive = windowEvents.find(
-          (event) => event.type === "main-frame-navigated" || isErrorEvent(event),
-        );
-        if (decisive?.type === "main-frame-navigated") {
-          return {
-            events,
-            failure: {
-              phase: "browser",
-              message: `the update was a full reload: the main frame navigated to ${decisive.url} during the update window`,
-            },
-          };
-        }
-        if (decisive !== undefined) {
-          return { events, failure: firstBrowserError([decisive]) };
-        }
+        const decisive = decisiveFailure(windowEvents);
+        if (decisive !== undefined) return { events, failure: decisive };
         if (!Object.is(before.value, after.value)) {
           return {
             events,
@@ -512,12 +502,37 @@ async function observeBrowser(
 }
 
 /**
- * An operation that failed did so after whatever the page had already reported, so a recorded
- * event outranks the operation's own reason. Only when the page reported nothing does the
- * operation failure become the first incompatible behavior.
+ * An operation that rejected did so after whatever the page had already reported, so a recorded
+ * event — an error or a navigation — outranks its reason. A timeout is different: the clock
+ * ended it at a fixed moment, and anything drained afterwards came from work that was still
+ * running, so the timeout keeps its place.
  */
-function earlierOf(events: readonly BrowserEvent[], reason: string): ObservedFailure {
-  return firstBrowserError(events) ?? { phase: "browser", message: reason, fromDeadline: true };
+function earlierOf(
+  events: readonly BrowserEvent[],
+  failure: { readonly reason: string; readonly timedOut?: boolean },
+): ObservedFailure {
+  const asDeadline: ObservedFailure = {
+    phase: "browser",
+    message: failure.reason,
+    ...(failure.timedOut === true ? { fromDeadline: true } : {}),
+  };
+  if (failure.timedOut === true) return asDeadline;
+  return decisiveFailure(events) ?? asDeadline;
+}
+
+/** The first thing the page reported that ends a run, in the order it was observed. */
+function decisiveFailure(events: readonly BrowserEvent[]): ObservedFailure | undefined {
+  const decisive = events.find(
+    (event) => event.type === "main-frame-navigated" || isErrorEvent(event),
+  );
+  if (decisive === undefined) return undefined;
+  if (decisive.type === "main-frame-navigated") {
+    return {
+      phase: "browser",
+      message: `the update was a full reload: the main frame navigated to ${decisive.url} during the update window`,
+    };
+  }
+  return firstBrowserError([decisive]);
 }
 
 function isErrorEvent(event: BrowserEvent): boolean {

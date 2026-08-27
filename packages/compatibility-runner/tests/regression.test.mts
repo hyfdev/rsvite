@@ -822,3 +822,114 @@ test("a browser failure names no log evidence, because it has none", async () =>
     { type: "console-error", message: "browser said no" },
   ]);
 });
+
+test("a navigation reported before a failing operation still decides the failure", async () => {
+  const port = await freePort();
+  const browser = createSyntheticBrowser({
+    documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
+  });
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser,
+    update: () => {
+      browser.lastPage()?.navigate(`http://127.0.0.1:${String(port)}/`);
+      return Promise.reject(new Error("the update gave up after navigating"));
+    },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const failure = (report.result as Record<string, unknown>)["firstIncompatibleBehavior"] as {
+    message: string;
+  };
+
+  // The navigation was observed first; the rejection only happened afterwards.
+  assert.match(failure.message, /full reload: the main frame navigated/);
+});
+
+test("an ordinary update rejection is not overwritten by a later lifecycle exit", async () => {
+  const port = await freePort();
+  const browser = createSyntheticBrowser({
+    documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
+  });
+  const request = await baseRequest("rsvite", { origin: `http://127.0.0.1:${String(port)}` });
+  const pidFile = join(request.artifactRoot, "server.pid");
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
+  };
+  manifest.entries[0]!.commands["dev"] = {
+    argv: [process.execPath, fixture("serve.mjs")],
+    env: { PORT: String(port), OWN_PID_FILE: pidFile },
+  };
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest,
+    browser,
+    update: () => {
+      // The update fails on its own merits, and only then does the server die.
+      process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL");
+      return Promise.reject(new Error("the update failed on its own"));
+    },
+  });
+  const failure = (report.result as Record<string, unknown>)["firstIncompatibleBehavior"] as {
+    phase: string;
+    message: string;
+  };
+
+  assert.equal(failure.phase, "browser");
+  assert.match(failure.message, /the update failed on its own/);
+});
+
+test("an error produced after a timeout does not displace the timeout", async () => {
+  const port = await freePort();
+  const browser = createSyntheticBrowser({
+    documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
+  });
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser,
+    update: (_page, signal) =>
+      new Promise<void>((resolve) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            // Reported only once the runner had already given up on this update.
+            browser.lastPage()?.emit({ type: "console-error", message: "after the timeout" });
+            resolve();
+          },
+          { once: true },
+        );
+      }),
+    timeouts: { installMs: 10_000, lifecycleMs: 30_000, browserMs: 300 },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const failure = (report.result as Record<string, unknown>)["firstIncompatibleBehavior"] as {
+    message: string;
+  };
+
+  assert.match(failure.message, /the update did not finish within its deadline/);
+});
+
+test("a lifecycle command that does not exist says so", async () => {
+  const request = await baseRequest("rsvite");
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
+  };
+  manifest.entries[0]!.commands["dev"] = { argv: ["definitely-not-a-real-executable-xyz"] };
+
+  const report = await runCompatibilityCheck({ ...request, manifest });
+  const failure = (report.result as Record<string, unknown>)["firstIncompatibleBehavior"] as {
+    phase: string;
+    message: string;
+  };
+
+  assert.equal(failure.phase, "dev");
+  assert.match(failure.message, /could not start.*ENOENT/);
+});
