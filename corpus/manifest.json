@@ -38,8 +38,8 @@
         "timeoutMs": 900000
       },
       "expectedCapabilities": ["html"],
-      "javascriptApiLevel": "C0",
-      "notes": "Imported slice: playground/html/__tests__/html.spec.ts and playground/html/index.html, the fixture that holds the comments asserted by main > preserve comments.",
+      "javascriptApiLevel": "C2",
+      "notes": "Selected case: playground/html/__tests__/html.spec.ts and playground/html/index.html. Vite loads playground/html/vite.config.js, whose transformIndexHtml hook wraps the source fragment in a body before the main > preserve comments assertion.",
       "extensions": {
         "x-vite-upstream": {
           "suite": "playground/html",

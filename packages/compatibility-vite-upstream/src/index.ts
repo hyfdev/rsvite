@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -11,17 +11,31 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import { createRequire } from "node:module";
 import { delimiter, dirname, isAbsolute, join, relative, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createContractValidators } from "@rsvite/compatibility-contract";
 
 export const VITE_UPSTREAM_REPOSITORY = "https://github.com/vitejs/vite";
 export const VITE_UPSTREAM_COMMIT = "ee644014aab61e546742b862a7d7b0d6c7d67a7b";
+export const VITE_UPSTREAM_VITEST_VERSION = "4.1.11";
 export const HTML_PRESERVE_COMMENTS_ENTRY_ID = "vite-upstream-html-preserve-comments";
+export const VITE_UPSTREAM_BROWSER_OBSERVATION = "nested-vitest-browser-not-observed-by-runner";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = join(srcDir, "..");
 const repoRoot = join(packageDir, "../..");
+const rsviteWorkspaceSourcePaths = [
+  "Cargo.lock",
+  "Cargo.toml",
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "vite.config.ts",
+  "crates/rsvite_binding",
+  "crates/rsvite_core",
+  "packages/rsvite",
+] as const;
 
 export const vendorRoot = join(repoRoot, "corpus/vite-upstream");
 export const corpusManifestPath = join(repoRoot, "corpus/manifest.json");
@@ -31,6 +45,172 @@ export const viteBaselineDir = join(
   "corpus/results/vite-upstream-html-preserve-comments/vite",
 );
 export const viteBaselineResultPath = join(viteBaselineDir, "result.json");
+export const rsviteBaselineDir = join(
+  repoRoot,
+  "corpus/results/vite-upstream-html-preserve-comments/rsvite",
+);
+export const rsviteBaselineResultPath = join(rsviteBaselineDir, "result.json");
+export const rsviteUpstreamConfigPath = join(repoRoot, "packages/rsvite/vite.upstream.config.ts");
+
+export interface VitestInstallation {
+  readonly executable: string;
+  readonly version: string;
+}
+
+function readVitestInstallation(
+  projectRoot: string,
+  installationRoot = projectRoot,
+): VitestInstallation {
+  const require = createRequire(join(projectRoot, "package.json"));
+  const packageJson = require.resolve("vitest/package.json");
+  const projectRelativePackage = relative(installationRoot, packageJson);
+  if (
+    projectRelativePackage === "" ||
+    isAbsolute(projectRelativePackage) ||
+    projectRelativePackage.split(sep)[0] === ".."
+  ) {
+    throw new Error(`Vitest resolved outside the declared project root: ${packageJson}`);
+  }
+
+  const metadata = asRecord(JSON.parse(readFileSync(packageJson, "utf8")) as unknown);
+  const version = requiredString(metadata?.["version"], "vitest.version");
+  const bin = metadata?.["bin"];
+  const executableRelative =
+    typeof bin === "string" ? bin : requiredString(asRecord(bin)?.["vitest"], "vitest.bin.vitest");
+  const executable = join(dirname(packageJson), executableRelative);
+  if (!statSync(executable).isFile()) {
+    throw new Error(`Vitest executable is not a file: ${executable}`);
+  }
+  return { executable, version };
+}
+
+/** The assertion runner installed by the exact external Vite lockfile. */
+export function viteVitestInstallation(checkout: string): VitestInstallation {
+  const installation = readVitestInstallation(checkout);
+  if (installation.version !== VITE_UPSTREAM_VITEST_VERSION) {
+    throw new Error(
+      `pinned Vite checkout installed Vitest ${installation.version}, expected ${VITE_UPSTREAM_VITEST_VERSION}`,
+    );
+  }
+  return installation;
+}
+
+/** The exact-version local runner used only by the no-network daily parity probe. */
+export function workspaceVitestInstallation(): VitestInstallation {
+  const installation = readVitestInstallation(packageDir, repoRoot);
+  if (installation.version !== VITE_UPSTREAM_VITEST_VERSION) {
+    throw new Error(
+      `rsvite workspace installed Vitest ${installation.version}, expected ${VITE_UPSTREAM_VITEST_VERSION}`,
+    );
+  }
+  return installation;
+}
+
+const expectedRsviteFailureError =
+  "rsvite did not fail only at the pinned preserve-comments assertion; refusing to accept the expected C0 execution";
+
+function assertExecution(condition: unknown): asserts condition {
+  if (!condition) throw new Error(expectedRsviteFailureError);
+}
+
+/**
+ * Accepts the negative C0 evidence only when the entire Vitest execution contains the selected
+ * assertion failure and nothing else. The recorder, committed artifacts, and daily live probe all
+ * call this same boundary.
+ */
+export function assertExpectedRsviteHtmlPreserveCommentsExecution(
+  report: {
+    readonly failure?: { readonly phase: string; readonly message: string };
+  },
+  logs: { readonly stdout: string; readonly stderr: string },
+): void {
+  assertExecution(report.failure?.phase === "test");
+  assertExecution(report.failure.message === "test exited with code 1");
+
+  const jsonReports: unknown[] = [];
+  for (const line of logs.stdout.split(/\r?\n/)) {
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (asRecord(value)?.["numTotalTestSuites"] === undefined) {
+      continue;
+    }
+    jsonReports.push(value);
+  }
+  assertExecution(jsonReports.length === 1);
+  const summary = asRecord(jsonReports[0]);
+  assertExecution(summary !== undefined);
+  assertExecution(summary["success"] === false);
+  assertExecution(summary["numFailedTests"] === 1);
+
+  const testResults = summary["testResults"];
+  assertExecution(Array.isArray(testResults) && testResults.length === 1);
+  const file = asRecord(testResults[0]);
+  assertExecution(file !== undefined);
+  assertExecution(file["status"] === "failed");
+  assertExecution(file["message"] === "");
+  const spec = file["name"];
+  assertExecution(
+    typeof spec === "string" &&
+      spec.replaceAll("\\", "/").endsWith("/playground/html/__tests__/html.spec.ts"),
+  );
+
+  const assertions = file["assertionResults"];
+  assertExecution(Array.isArray(assertions));
+  const failed = assertions.filter((value) => asRecord(value)?.["status"] === "failed");
+  const skipped = assertions.filter((value) => asRecord(value)?.["status"] === "skipped");
+  assertExecution(failed.length === 1);
+  assertExecution(
+    assertions.every((value) => {
+      const assertion = asRecord(value);
+      return assertion?.["status"] === "failed" || assertion?.["status"] === "skipped";
+    }),
+  );
+
+  const assertion = asRecord(failed[0]);
+  assertExecution(assertion?.["fullName"] === "main preserve comments");
+  assertExecution(assertion["title"] === "preserve comments");
+  assertExecution(
+    Array.isArray(assertion["ancestorTitles"]) &&
+      assertion["ancestorTitles"].length === 1 &&
+      assertion["ancestorTitles"][0] === "main",
+  );
+  const failureMessages = assertion["failureMessages"];
+  assertExecution(Array.isArray(failureMessages) && failureMessages.length === 1);
+  const failure = failureMessages[0];
+  assertExecution(typeof failure === "string");
+  for (const marker of [
+    "AssertionError: expected",
+    "<!-- comment one -->",
+    "<!-- comment two -->",
+    "html.spec.ts:101:18",
+  ]) {
+    assertExecution(failure.includes(marker));
+  }
+
+  assertExecution(
+    skipped.every((value) => {
+      const messages = asRecord(value)?.["failureMessages"];
+      return Array.isArray(messages) && messages.length === 0;
+    }),
+  );
+
+  // The default reporter is required because Vitest's JSON reporter omits unhandled errors.
+  // One positive marker proves that reporter ran; the structured report above owns the expected
+  // assertion details, while the negative markers below reject failures JSON does not expose.
+  assertExecution(logs.stderr.includes("Failed Tests 1"));
+  for (const marker of [
+    "Failed Suites",
+    "Unhandled Errors",
+    "Unhandled Rejection",
+    "Uncaught Exception",
+  ]) {
+    assertExecution(!logs.stdout.includes(marker) && !logs.stderr.includes(marker));
+  }
+}
 
 export interface ProvenanceFile {
   readonly source: string;
@@ -56,6 +236,12 @@ export interface ProvenanceViolation {
   readonly message: string;
 }
 
+export interface RsviteWorkspaceSubject {
+  readonly name: "rsvite";
+  readonly version: string;
+  readonly commit: string;
+}
+
 export type ProvenanceCheck =
   | { readonly valid: true }
   | { readonly valid: false; readonly violations: readonly ProvenanceViolation[] };
@@ -64,6 +250,91 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/** A workspace result names committed product source, never an uncommitted local build. */
+export function readRsviteWorkspaceSubject(root = repoRoot): RsviteWorkspaceSubject {
+  const packagePath = join(root, "packages/rsvite/package.json");
+  let packageJson: unknown;
+  try {
+    packageJson = JSON.parse(readFileSync(packagePath, "utf8")) as unknown;
+  } catch (error) {
+    throw new Error(`cannot read rsvite workspace metadata at ${packagePath}: ${String(error)}`);
+  }
+
+  const record = asRecord(packageJson);
+  if (record?.["name"] !== "rsvite") {
+    throw new Error(`${packagePath} must declare package name rsvite`);
+  }
+  const version = record["version"];
+  if (typeof version !== "string" || version.length === 0) {
+    throw new Error(`${packagePath} must declare a non-empty string version`);
+  }
+
+  let status: string;
+  let commit: string;
+  try {
+    status = execFileSync(
+      "git",
+      ["status", "--porcelain=v1", "--untracked-files=all", "--", ...rsviteWorkspaceSourcePaths],
+      { cwd: root, encoding: "utf8" },
+    );
+    commit = execFileSync(
+      "git",
+      ["log", "-1", "--format=%H", "HEAD", "--", ...rsviteWorkspaceSourcePaths],
+      { cwd: root, encoding: "utf8" },
+    ).trim();
+  } catch (error) {
+    throw new Error(`cannot identify committed rsvite workspace source: ${String(error)}`);
+  }
+  if (status.trim().length > 0) {
+    throw new Error(
+      `rsvite workspace source must be committed before recording:\n${status.trim()}`,
+    );
+  }
+  if (!/^[0-9a-f]{40}$/.test(commit)) {
+    throw new Error(`rsvite workspace has no committed product source: ${commit}`);
+  }
+
+  return { name: "rsvite", version, commit };
+}
+
+/** A committed result remains current while only source outside the product build has changed. */
+export function assertRsviteWorkspaceSubjectMatches(subject: unknown, root = repoRoot): void {
+  const current = readRsviteWorkspaceSubject(root);
+  const recorded = asRecord(subject);
+  if (recorded?.["name"] !== current.name) {
+    throw new Error(`rsvite result subject name must be ${current.name}`);
+  }
+  if (recorded["version"] !== current.version) {
+    throw new Error(`rsvite result subject version must be ${current.version}`);
+  }
+  const commit = recorded["commit"];
+  if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) {
+    throw new Error("rsvite result subject commit must be a 40-character lowercase Git SHA");
+  }
+
+  const gitSucceeds = (args: string[]): boolean => {
+    const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    if (result.error !== undefined || result.status === null) {
+      throw new Error(`cannot inspect rsvite result source: ${String(result.error)}`);
+    }
+    return result.status === 0;
+  };
+
+  if (!gitSucceeds(["cat-file", "-e", `${commit}^{commit}`])) {
+    throw new Error(`rsvite result subject commit does not exist in this checkout: ${commit}`);
+  }
+  if (!gitSucceeds(["merge-base", "--is-ancestor", commit, current.commit])) {
+    throw new Error(
+      `rsvite result subject commit is not an ancestor of the current workspace: ${commit}`,
+    );
+  }
+  if (
+    !gitSucceeds(["diff", "--quiet", commit, current.commit, "--", ...rsviteWorkspaceSourcePaths])
+  ) {
+    throw new Error(`rsvite product source differs from recorded subject commit ${commit}`);
+  }
 }
 
 function posixRelative(from: string, to: string): string {
@@ -213,6 +484,61 @@ export function assertResultArtifactsExist(resultPath: string, result: unknown):
 }
 
 /**
+ * The shared v1 runner always carries its normalized browser event array. This selected Vitest
+ * case owns a nested browser outside that adapter boundary, so its local extension prevents an
+ * empty runner array from being misread as a complete browser observation.
+ */
+export function assertViteUpstreamBrowserObservation(result: unknown): void {
+  const record = asRecord(result);
+  const browser = asRecord(asRecord(record?.["environment"])?.["browser"]);
+  const errors = record?.["browserErrors"];
+  const extension = asRecord(asRecord(record?.["extensions"])?.["x-vite-upstream"]);
+  if (browser === undefined) {
+    throw new Error("the Vite upstream result does not identify its nested browser");
+  }
+  if (!Array.isArray(errors) || errors.length !== 0) {
+    throw new Error("the Vite upstream runner browserErrors field must be an empty v1 array");
+  }
+  if (extension?.["browserObservation"] !== VITE_UPSTREAM_BROWSER_OBSERVATION) {
+    throw new Error(
+      "the Vite upstream result must disclose that its nested browser was not runner-observed",
+    );
+  }
+}
+
+/** Add and validate the adapter-owned observation disclosure before publishing a recorded result. */
+export function publishViteUpstreamBrowserObservation(
+  report: { readonly result: unknown; readonly resultPath: string },
+  manifest: unknown,
+): Record<string, unknown> {
+  const record = asRecord(report.result);
+  if (record === undefined) throw new Error("the Vite upstream recorder produced no result object");
+  const extensions = asRecord(record["extensions"]) ?? {};
+  const adapter = asRecord(extensions["x-vite-upstream"]) ?? {};
+  const result = {
+    ...record,
+    extensions: {
+      ...extensions,
+      "x-vite-upstream": {
+        ...adapter,
+        browserObservation: VITE_UPSTREAM_BROWSER_OBSERVATION,
+      },
+    },
+  };
+  assertViteUpstreamBrowserObservation(result);
+  const validation = createContractValidators().validateResultAgainstManifest(manifest, result);
+  if (!validation.valid) {
+    throw new Error(
+      `the Vite upstream observation disclosure violates the contract:\n${validation.violations
+        .map((violation) => violation.message)
+        .join("\n")}`,
+    );
+  }
+  writeFileSync(report.resultPath, `${JSON.stringify(result, null, 2)}\n`);
+  return result;
+}
+
+/**
  * The checkout must be the pinned commit with a clean worktree. Staged, unstaged, or
  * untracked source is not that commit.
  */
@@ -239,6 +565,55 @@ function htmlPreserveCommentsEntry(
     throw new Error(`the corpus manifest has no entry ${HTML_PRESERVE_COMMENTS_ENTRY_ID}`);
   }
   return entry;
+}
+
+export function manifestForRsviteHtmlPreserveComments(
+  manifest: unknown = readCorpusManifest(),
+  options: {
+    readonly playwrightModule?: string;
+    readonly upstreamRoot?: string;
+    readonly viteCheckout?: string;
+    readonly vitestExecutable?: string;
+  } = {},
+): unknown {
+  const document = asRecord(manifest);
+  const entries = document?.["entries"];
+  if (!Array.isArray(entries)) throw new Error("the corpus manifest has no entries");
+
+  return {
+    ...document,
+    entries: entries.map((value) => {
+      const entry = asRecord(value);
+      if (entry?.["id"] !== HTML_PRESERVE_COMMENTS_ENTRY_ID) return value;
+      const commands = asRecord(entry["commands"]);
+      return {
+        ...entry,
+        commands: {
+          ...commands,
+          test: {
+            argv: [
+              options.vitestExecutable ?? workspaceVitestInstallation().executable,
+              "run",
+              "--config",
+              rsviteUpstreamConfigPath,
+            ],
+            env: {
+              NO_COLOR: "1",
+              ...(options.playwrightModule === undefined
+                ? {}
+                : { RSVITE_PLAYWRIGHT_MODULE: options.playwrightModule }),
+              ...(options.upstreamRoot === undefined
+                ? {}
+                : { RSVITE_UPSTREAM_ROOT: options.upstreamRoot }),
+              ...(options.viteCheckout === undefined
+                ? {}
+                : { RSVITE_VITE_CHECKOUT: options.viteCheckout }),
+            },
+          },
+        },
+      };
+    }),
+  };
 }
 
 /** Paths are relative to the vendored copy. */
@@ -317,11 +692,41 @@ export function assertViteNodeBundle(checkout: string): void {
 
 /** Install deps, discard any existing dist, then build `packages/vite` so test-serve can load it. */
 export function preparePinnedViteCheckout(checkout: string): void {
-  const install = htmlPreserveCommentsCommandArgv("install");
-  execFileSync(install[0]!, install.slice(1), { cwd: checkout, encoding: "utf8" });
+  preparePinnedViteDependencies(checkout);
   wipeViteDist(checkout);
   execFileSync("pnpm", ["--filter", "vite", "build"], { cwd: checkout, encoding: "utf8" });
   assertViteNodeBundle(checkout);
+}
+
+export function preparePinnedViteDependencies(checkout: string): void {
+  const install = htmlPreserveCommentsCommandArgv("install");
+  execFileSync(install[0]!, install.slice(1), { cwd: checkout, encoding: "utf8" });
+}
+
+export function vitePlaywrightChromiumModule(checkout: string): string {
+  return createRequire(join(checkout, "package.json")).resolve("playwright-chromium");
+}
+
+export async function readViteChromiumVersion(checkout: string): Promise<string> {
+  const modulePath = vitePlaywrightChromiumModule(checkout);
+  const imported = (await import(pathToFileURL(modulePath).href)) as {
+    default?: unknown;
+    chromium?: unknown;
+  };
+  const playwright = (imported.chromium === undefined ? imported.default : imported) as {
+    chromium: {
+      launch(options: { headless: boolean }): Promise<{
+        version(): string;
+        close(): Promise<void>;
+      }>;
+    };
+  };
+  const browser = await playwright.chromium.launch({ headless: true });
+  try {
+    return browser.version();
+  } finally {
+    await browser.close();
+  }
 }
 
 /** The adopted Vite baseline is Linux x64. Other hosts must not be labeled as that environment. */

@@ -30,8 +30,8 @@ Every validation input and every raw result is recorded through the versioned co
 
 - Pin an exact Vite upstream commit and preserve its license and source commit.
   <!-- Author: rsvite-lead -->
-- The current pin is Vite [`ee644014aab61e546742b862a7d7b0d6c7d67a7b`](https://github.com/vitejs/vite/tree/ee644014aab61e546742b862a7d7b0d6c7d67a7b). The imported slice is `playground/html/__tests__/html.spec.ts` and `playground/html/index.html`, the fixture that contains the comments asserted by `main > preserve comments`. The preserved license is MIT at `LICENSE`. Unrecorded edits to imported files fail the provenance check in `@rsvite/compatibility-vite-upstream`.
-  <!-- Author: rsvite-senior-engineer-2 -->
+- The current pin is Vite [`ee644014aab61e546742b862a7d7b0d6c7d67a7b`](https://github.com/vitejs/vite/tree/ee644014aab61e546742b862a7d7b0d6c7d67a7b). The imported slice contains `playground/html/__tests__/html.spec.ts`, `playground/html/index.html`, and `playground/html/vite.config.js`. Vite's pass for `main > preserve comments` depends on the config's `transformIndexHtml` hook, so the entry requires C2; a C0 rsvite run is negative compatibility evidence rather than positive acceptance for raw HTML serving. The preserved license is MIT at `LICENSE`. Unrecorded edits to imported files fail the provenance check in `@rsvite/compatibility-vite-upstream`.
+  <!-- Author: rsvite-lead -->
 - Keep imported tests and fixtures unchanged whenever practical. rsvite runners, adapters, and result classification live outside the vendored tests.
   <!-- Author: rsvite-lead -->
 - Do not change upstream expectations to manufacture a pass.

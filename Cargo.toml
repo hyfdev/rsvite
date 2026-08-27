@@ -1,6 +1,23 @@
 [workspace]
-members = []
+members = ["crates/rsvite_binding", "crates/rsvite_core"]
 resolver = "2"
 
 [workspace.package]
 edition = "2024"
+
+[workspace.dependencies]
+axum = "=0.8.9"
+napi = { version = "=3.12.2", features = ["async", "napi8"] }
+napi-build = "=2.4.1"
+napi-derive = "=3.6.2"
+rsvite_core = { path = "crates/rsvite_core" }
+tempfile = "=3.23.0"
+thiserror = "=2.0.17"
+tokio = { version = "=1.53.1", features = [
+  "fs",
+  "io-util",
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "sync",
+] }

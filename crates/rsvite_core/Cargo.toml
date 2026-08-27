@@ -1,0 +1,13 @@
+[package]
+name = "rsvite_core"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+axum.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
