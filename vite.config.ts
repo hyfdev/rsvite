@@ -31,9 +31,18 @@ export default defineConfig({
       "check:test:contract": {
         command: "vp test --config packages/compatibility-contract/vite.config.ts",
       },
+      "check:test:runner": {
+        command: "vp test --config packages/compatibility-runner/vite.config.ts",
+      },
       ready: {
         command: "echo ready checks passed",
-        dependsOn: ["check:format", "check:lint", "check:rust", "check:test:contract"],
+        dependsOn: [
+          "check:format",
+          "check:lint",
+          "check:rust",
+          "check:test:contract",
+          "check:test:runner",
+        ],
       },
     },
   },

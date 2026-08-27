@@ -1,0 +1,116 @@
+# @rsvite/compatibility-runner
+
+The shared process and browser orchestration behind every compatibility run. Vite and rsvite reach
+a raw result through this one path, so a difference between two results is a difference between the
+subjects rather than between two ways of measuring them.
+
+```ts
+import { runCompatibilityCheck } from "@rsvite/compatibility-runner";
+
+const report = await runCompatibilityCheck({
+  manifest,
+  entryId: "drawdb",
+  lifecycle: "dev",
+  subject: { name: "rsvite", version: "0.0.0" },
+  environment,
+  projectRoot,
+  artifactRoot,
+  origin: "http://127.0.0.1:5173",
+  declared,
+  browser,
+  timeouts: { installMs: 600_000, lifecycleMs: 300_000, browserMs: 30_000 },
+});
+```
+
+One call runs install plus one selected lifecycle command for one entry under one subject, and
+returns a raw result already accepted with its manifest by the contract's canonical
+`validateResultAgainstManifest`. A result the contract would reject is never returned: the runner
+throws instead, because an invalid document is worse than a missing run.
+
+The manifest is validated before anything is created or spawned. A malformed manifest describes
+commands nobody agreed to run, so it is refused while refusing it is still free.
+
+The accepted result is written to `result.json` inside `artifactRoot`, beside the logs it names.
+The contract reads evidence paths as relative to the result file, so the runner writes that file
+itself rather than leaving the base to a convention nobody recorded. Only logs that exist are
+listed, and an install failure points at install evidence rather than at a lifecycle log the run
+never created.
+
+## What the runner decides, and what it refuses to
+
+It decides everything observable: whether a command failed, timed out or never became ready,
+what the browser reported, and whether an update was really a full reload.
+
+It decides nothing about the product. Which capabilities a run set out to verify, which
+implementation owns them, what fell back, and what a failure means all arrive through `declared`
+and are recorded as given. The runner would have to infer them from command output, and an
+inferred value in the evidence is worse than no run at all. If a run fails and the caller's
+`classifyFailure` returns nothing, the runner throws rather than inventing a classification.
+
+## Processes
+
+Every command leads its own process group. A dev server started through a package manager is a
+tree, and killing only the direct child orphans the rest — which then keeps the port the next run
+needs. Stopping a command therefore signals the group, waits briefly, and escalates to `SIGKILL`.
+A timeout is reported on the result rather than thrown, because a subject that hangs is evidence.
+
+Readiness follows the manifest: an HTTP probe, a stdout pattern, or the process exiting. A command
+that dies while being waited on is reported as having exited before readiness, so a crash is never
+filed as a slow start. Each HTTP probe carries its own deadline, because a server that accepts a
+connection and never answers would otherwise hold the probe past the readiness timeout it was
+supposed to enforce.
+
+Whether a command ended on its own or because the runner asked it to is decided from the
+kernel's record of the process, read before anything is signalled. The cheaper signals all
+fail somewhere: a close event may not have been delivered while the host was busy, an exited
+process that has not been reaped still accepts signals, and a command whose own handler turns
+a termination into `process.exit(0)` leaves no signal on its outcome at all.
+
+That record exists on Linux, the declared evidence environment. On other platforms the runner
+falls back to those weaker signals, and **that fallback is not reliable attribution** — an
+external termination the host was too busy to observe can be misread as a stop the runner
+requested. A result produced there should be treated as unattributed rather than as proof the
+command was still healthy.
+
+Stopping waits for the group to be gone, not for the leader to close. A descendant that ignores
+`SIGTERM`, or one that outlives a leader which exited on its own, is escalated to `SIGKILL` and
+waited for; the call does not return while any process of the group is alive.
+
+`lifecycleMs` bounds the lifecycle process from the moment it is spawned and covers readiness and
+the browser phase together, so a slow start cannot buy the browser more time than the caller
+allowed for the whole thing.
+
+Groups outlive their parent by design, which is what makes group cleanup work. Two cases are worth
+separating:
+
+- A normal exit of the host, including `process.exit`, still kills any group left running.
+- `SIGTERM` and `SIGINT` are catchable, but this runner deliberately does not catch them: exit
+  handlers do not run for an uncaught signal, so a group would survive. Installing handlers would
+  change the signal semantics of whatever embeds the runner, so the embedder keeps that policy.
+  There is no request-scoped cancellation API today — `runCompatibilityCheck` takes no signal and
+  returns no cancel handle — so an embedder that needs to stop a run mid-flight has to handle the
+  signal itself. A supported cancellation API is future work.
+- `SIGKILL` cannot be caught by anything, so no process can clean up after it.
+
+## Browser adapters
+
+A `BrowserAdapter` opens a page, evaluates expressions in the _current_ document, and reports
+events. It never returns a verdict. The runner normalizes console errors, page errors and failed
+requests onto the result and applies the reload rule itself, so every subject is judged the same
+way no matter which adapter drove it:
+
+- any main-frame navigation during the update window is a full reload;
+- an in-memory sentinel that did not survive the update is a full reload the navigation record
+  happened to miss.
+
+`createSyntheticBrowser` is an in-memory adapter for exercising orchestration without a browser. It
+models the property the sentinel rule depends on: navigating installs a new document, and the new
+document does not inherit the previous document's memory. A real browser adapter belongs to the
+issue that consumes this runner.
+
+## Fixtures
+
+`fixtures/` holds a synthetic project — one HTTP server serving one document, and a script that
+exits with a requested code after a requested delay. They exist to drive success, failure, timeout,
+readiness, browser and cleanup paths. They are not a corpus entry and produce no compatibility
+evidence about any project.
