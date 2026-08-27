@@ -1,0 +1,390 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rsvite:compatibility:corpus-manifest:v1",
+  "title": "rsvite compatibility corpus manifest, version 1",
+  "description": "Every validation input rsvite measures compatibility against. One manifest document lists the pinned Vite upstream slices and the pinned real projects that the runner and the project adapters consume.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "entries"],
+  "properties": {
+    "contractVersion": {
+      "description": "Version of this contract. A breaking change publishes v2 rather than editing v1 in place.",
+      "const": 1
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "source",
+        "lockfile",
+        "commands",
+        "readiness",
+        "expectedCapabilities",
+        "javascriptApiLevel"
+      ],
+      "properties": {
+        "id": {
+          "description": "Stable slug. Raw results reference an entry by this id, so it must not change once results exist.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "maxLength": 64
+        },
+        "kind": {
+          "description": "Which evidence source this entry belongs to.",
+          "enum": ["vite-upstream-e2e", "real-project"]
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "lockfile": {
+          "$ref": "#/$defs/lockfile"
+        },
+        "commands": {
+          "type": "object"
+        },
+        "readiness": {
+          "$ref": "#/$defs/readiness"
+        },
+        "browserAcceptance": {
+          "$ref": "#/$defs/browserAcceptance"
+        },
+        "expectedCapabilities": {
+          "description": "Product capabilities this entry is expected to exercise. Names match the product capability record.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "urn:rsvite:compatibility:capability:v1"
+          }
+        },
+        "javascriptApiLevel": {
+          "$ref": "#/$defs/javascriptApiLevel"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "real-project"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "browserAcceptance": {
+                "$ref": "#/$defs/browserAcceptance"
+              },
+              "commands": {
+                "$ref": "#/$defs/realProjectCommands"
+              }
+            },
+            "required": ["browserAcceptance"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "vite-upstream-e2e"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "commands": {
+                "$ref": "#/$defs/upstreamCommands"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "source": {
+      "description": "Where the input comes from and at which exact revision. Provenance is mandatory: an entry pinned to a moving reference is not reproducible evidence.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit", "license"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "commit": {
+          "description": "Full 40-character commit SHA. A branch or tag name is rejected on purpose.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["spdxId", "path"],
+          "properties": {
+            "spdxId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9.+-]*$"
+            },
+            "path": {
+              "description": "Path to the preserved license text, relative to the vendored copy.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "lockfile": {
+      "description": "The dependency graph is pinned by the project's own lockfile, so installs are reproducible.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "packageManager"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "packageManager": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {
+              "enum": ["pnpm", "npm", "yarn", "bun"]
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+            }
+          }
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["argv"],
+      "properties": {
+        "argv": {
+          "description": "Executable and arguments, already split. A single shell string is rejected so quoting cannot differ between runners.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "env": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Z][A-Z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "readiness": {
+      "description": "How the runner decides a long-running command is ready before acceptance starts.",
+      "type": "object",
+      "required": ["type", "timeoutMs"],
+      "properties": {
+        "type": {
+          "enum": ["http-ready", "stdout-pattern", "process-exit"]
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "urlPath", "timeoutMs"],
+          "properties": {
+            "type": {
+              "const": "http-ready"
+            },
+            "urlPath": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "expectStatus": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "pattern", "timeoutMs"],
+          "properties": {
+            "type": {
+              "const": "stdout-pattern"
+            },
+            "pattern": {
+              "type": "string",
+              "minLength": 1
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "timeoutMs"],
+          "properties": {
+            "type": {
+              "const": "process-exit"
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      ]
+    },
+    "browserAcceptance": {
+      "description": "Browser entry point and the acceptance signals taken from it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entryPath", "mainFrameNavigationIsFailure"],
+      "properties": {
+        "entryPath": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "mainFrameNavigationIsFailure": {
+          "description": "Fixed true. A main-frame navigation during an update is a full reload, which the compatibility record treats as a failure rather than a passing HMR result.",
+          "const": true
+        },
+        "hmr": {
+          "$ref": "#/$defs/hmrAcceptance"
+        }
+      }
+    },
+    "hmrAcceptance": {
+      "description": "An HMR check must observe an in-memory sentinel. Persisted application state cannot distinguish an update from a full reload, so a stored sentinel is rejected.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sentinelExpression", "sentinelStorage", "edit", "expectedText"],
+      "properties": {
+        "sentinelExpression": {
+          "description": "Expression evaluated in the page that yields the sentinel value.",
+          "type": "string",
+          "minLength": 1
+        },
+        "sentinelStorage": {
+          "description": "Fixed in-memory. localStorage, sessionStorage and IndexedDB survive a reload and cannot prove an update happened.",
+          "const": "in-memory"
+        },
+        "edit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "find", "replace"],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "find": {
+              "type": "string",
+              "minLength": 1
+            },
+            "replace": {
+              "type": "string"
+            }
+          }
+        },
+        "expectedText": {
+          "description": "Text expected in the page after the edit is applied.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "javascriptApiLevel": {
+      "description": "Declared JavaScript API level this entry is measured at.",
+      "enum": ["C0", "C1", "C2", "C3"]
+    },
+    "extensions": {
+      "description": "Adapter-owned data. An adapter extends the contract here instead of editing vendored upstream sources or expectations.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^x-[a-z0-9][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "realProjectCommands": {
+      "description": "A real project is validated through its own dev, build and preview path, so all four commands are required.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["install", "dev", "build", "preview"],
+      "properties": {
+        "install": {
+          "$ref": "#/$defs/command"
+        },
+        "dev": {
+          "$ref": "#/$defs/command"
+        },
+        "build": {
+          "$ref": "#/$defs/command"
+        },
+        "preview": {
+          "$ref": "#/$defs/command"
+        }
+      }
+    },
+    "upstreamCommands": {
+      "description": "An upstream slice is validated by running the suite it already ships.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["install", "test"],
+      "properties": {
+        "install": {
+          "$ref": "#/$defs/command"
+        },
+        "test": {
+          "$ref": "#/$defs/command"
+        }
+      }
+    }
+  }
+}

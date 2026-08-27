@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rsvite:compatibility:capability:v1",
+  "title": "rsvite product capability, version 1",
+  "description": "Observable product capabilities, named as the product capability record names them. `html` covers HTML entry discovery and serving, and HTML response behavior. The manifest and the raw result both reference this list, so a capability never has two spellings.",
+  "enum": [
+    "html",
+    "modules-and-assets",
+    "resolution",
+    "errors",
+    "file-watching",
+    "hmr-without-full-reload",
+    "build-output",
+    "preview-output",
+    "workers",
+    "ssr",
+    "framework-lifecycle"
+  ]
+}

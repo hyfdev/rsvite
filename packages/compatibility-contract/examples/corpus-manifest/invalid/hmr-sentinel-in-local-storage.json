@@ -1,0 +1,37 @@
+{
+  "contractVersion": 1,
+  "entries": [
+    {
+      "id": "drawdb",
+      "kind": "real-project",
+      "source": {
+        "repository": "https://github.com/drawdb-io/drawdb",
+        "commit": "031aef1f1c1d3f9027ccfacbf084e9c1a31b8abc",
+        "license": { "spdxId": "AGPL-3.0", "path": "LICENSE" }
+      },
+      "lockfile": {
+        "path": "package-lock.json",
+        "packageManager": { "name": "npm", "version": "10.9.2" }
+      },
+      "commands": {
+        "install": { "argv": ["npm", "ci"] },
+        "dev": { "argv": ["npm", "run", "dev"] },
+        "build": { "argv": ["npm", "run", "build"] },
+        "preview": { "argv": ["npm", "run", "preview"] }
+      },
+      "readiness": { "type": "http-ready", "urlPath": "/", "timeoutMs": 120000 },
+      "browserAcceptance": {
+        "entryPath": "/",
+        "mainFrameNavigationIsFailure": true,
+        "hmr": {
+          "sentinelExpression": "localStorage.getItem('rsvite-sentinel')",
+          "sentinelStorage": "local-storage",
+          "edit": { "path": "src/App.jsx", "find": "before", "replace": "after" },
+          "expectedText": "after"
+        }
+      },
+      "expectedCapabilities": ["hmr-without-full-reload"],
+      "javascriptApiLevel": "C1"
+    }
+  ]
+}

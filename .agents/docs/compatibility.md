@@ -5,8 +5,8 @@ rsvite tracks product capability and Vite JavaScript API compatibility separatel
 
 ## Product capability
 
-Product capability records observable behavior: supported modules and assets, resolution, errors, file watching, HMR without full-page reload, build and preview output, workers, SSR, and framework lifecycle behavior.
-<!-- Author: rsvite-lead -->
+Product capability records observable behavior: HTML entry discovery and serving, supported modules and assets, resolution, errors, file watching, HMR without full-page reload, build and preview output, workers, SSR, and framework lifecycle behavior.
+<!-- Author: rsvite-senior-engineer -->
 
 ## JavaScript API levels
 
@@ -18,6 +18,11 @@ Product capability records observable behavior: supported modules and assets, re
   <!-- Author: rsvite-lead -->
 - **C3 — selected Runtime and programmatic API:** runtime, environment, SSR, and JavaScript programmatic behavior are added from framework and application evidence.
   <!-- Author: rsvite-lead -->
+
+## Corpus and result contract
+
+Every validation input and every raw result is recorded through the versioned contract in [packages/compatibility-contract](../../packages/compatibility-contract). Its JSON Schemas are the normative definition of document shape, and its canonical validator is the normative enforcement of the schemas together with the invariants JSON Schema cannot express — a result must name an entry the manifest contains, restate that entry's exact commit, stay at or below the level the entry declares, and report ownership that does not contradict its own declared fallbacks. A source pinned to a moving reference, a result missing its correctness outcome, capability ownership or measured API level, an HMR check with a persisted sentinel, and a measurement missing its cache state and run order all fail validation instead of becoming evidence. One result covers one command run, so it owns a subset of the entry's target capabilities; coverage of an entry as a whole is a question across results. `contractVersion` covers both the shapes and those semantics, so a consumer in another language cannot produce valid evidence from the schemas alone. Runners and project adapters consume that contract rather than defining a per-project result format, and an adapter extends it through its own namespaced key instead of editing vendored upstream sources or expectations.
+<!-- Author: rsvite-senior-engineer -->
 
 ## Required evidence sources
 

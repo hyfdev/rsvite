@@ -1,0 +1,66 @@
+{
+  "contractVersion": 1,
+  "manifestEntry": {
+    "id": "vite-upstream-playground-slice",
+    "sourceCommit": "ee644014aab61e546742b862a7d7b0d6c7d67a7b"
+  },
+  "subject": {
+    "name": "rsvite",
+    "version": "0.0.0",
+    "commit": "094f2908f95c4cce32c36719a9650a40e1f75b7e"
+  },
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "runnerImage": "ubuntu-24.04",
+    "nodeVersion": "24.20.0",
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.20.0"
+    }
+  },
+  "command": {
+    "argv": ["pnpm", "test-serve", "playground/css"],
+    "cwd": "corpus/vite-upstream",
+    "exitCode": 1
+  },
+  "startedAt": "2026-08-27T09:10:00.000Z",
+  "finishedAt": "2026-08-27T09:12:03.000Z",
+  "outcome": "pass",
+  "javascriptApiLevel": "C0",
+  "firstIncompatibleBehavior": {
+    "phase": "test",
+    "message": "css url() asset was not rewritten to the served asset path",
+    "evidencePath": "logs/playground-css.log"
+  },
+  "failureClassification": {
+    "kind": "current-compatibility-requirement",
+    "evidence": "The same assertion passes against the Vite baseline in the paired run, so the divergence is rsvite behavior rather than a test coupled to Vite internals."
+  },
+  "capabilityOwners": [
+    {
+      "capability": "modules-and-assets",
+      "owner": "rust"
+    }
+  ],
+  "explicitFallbacks": [
+    {
+      "component": "vite-build-orchestration",
+      "reason": "Build output for this suite is still produced by Vite while the Rust build path is unimplemented.",
+      "capabilities": ["modules-and-assets"]
+    }
+  ],
+  "browserErrors": [
+    {
+      "type": "console-error",
+      "message": "Failed to load resource: 404",
+      "url": "http://localhost:5173/assets/logo.svg"
+    }
+  ],
+  "measurements": {
+    "wallClockMs": 123000,
+    "maxRssBytes": 733003776,
+    "cacheState": "warm",
+    "runOrder": 2
+  }
+}
