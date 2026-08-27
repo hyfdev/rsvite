@@ -102,3 +102,23 @@ test("a failure after launch closes the browser it had already acquired", async 
   assert.equal(stub.launched(), 1);
   assert.equal(stub.closed(), 1, "the browser was left running behind a rejected open");
 });
+
+// A setup step that hangs is the shape the runner actually has to survive: `open()` holds a
+// browser, the driver stops answering, and the runner gives up. Rejecting is not what is being
+// tested — settling at all is.
+for (const step of ["newContext", "addInitScript", "newPage"] as const) {
+  test(`an abort while ${step} is pending settles the open and closes the browser`, async () => {
+    const stub = stubCheckout({ hangIn: step });
+    const controller = new AbortController();
+
+    const open = opening(stub.root, controller.signal);
+    // The hang has to have started, or aborting would only be racing the launch.
+    await nextMacrotask();
+    assert.equal(stub.contextStarted(), 1, "the post-launch setup never started");
+    controller.abort(new Error("the runner gave up"));
+
+    await assert.rejects(open, /was aborted/, `${step} never settled after the abort`);
+    await nextMacrotask();
+    assert.equal(stub.closed(), 1, `the browser acquired before ${step} was left running`);
+  });
+}

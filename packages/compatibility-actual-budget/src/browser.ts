@@ -170,12 +170,29 @@ export function createPlaywrightBrowser(checkoutRoot: string): BrowserAdapter {
         (late) => late.close(),
       );
 
-      // Everything after the launch owns the browser: if any of it fails, the browser is closed
-      // rather than left running behind a rejected `open`.
+      // Everything after the launch owns the browser: if any of it fails — or if the runner gives
+      // up while it is still pending — the browser is closed rather than left running behind an
+      // `open` that never settles. Setting up a context is as capable of hanging as navigating is,
+      // and a step that only rejects is not abort-aware.
       try {
-        const context = await browser.newContext();
-        await context.addInitScript(INIT_SCRIPT);
-        const page = await context.newPage();
+        const context = await abortable(
+          browser.newContext(),
+          request.signal,
+          "creating the browser context",
+          nothingToRelease,
+        );
+        await abortable(
+          context.addInitScript(INIT_SCRIPT),
+          request.signal,
+          "installing the sentinel",
+          nothingToRelease,
+        );
+        const page = await abortable(
+          context.newPage(),
+          request.signal,
+          "creating the page",
+          nothingToRelease,
+        );
 
         const pending: BrowserEvent[] = [];
         const main = page.mainFrame();

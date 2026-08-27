@@ -18,7 +18,7 @@ function config() {
 function state() {
   return existsSync(statePath)
     ? JSON.parse(readFileSync(statePath, "utf8"))
-    : { launched: 0, closed: 0 };
+    : { launched: 0, closed: 0, contextStarted: 0 };
 }
 
 function record(patch) {
@@ -71,10 +71,18 @@ exports.chromium = {
     return {
       version: () => options.browserVersion ?? "149.0.0.0",
       async newContext() {
+        record({ contextStarted: state().contextStarted + 1 });
         if (options.failAfterLaunch === true) {
           throw new Error("the browser context could not be created");
         }
-        return { addInitScript: async () => undefined, newPage: async () => page };
+        // A setup step that never settles: the operation a real driver leaves pending when the
+        // browser stops answering. Nothing here rejects, so only an abort-aware caller escapes.
+        if (options.hangIn === "newContext") return new Promise(() => {});
+        return {
+          addInitScript: async () =>
+            options.hangIn === "addInitScript" ? new Promise(() => {}) : undefined,
+          newPage: async () => (options.hangIn === "newPage" ? new Promise(() => {}) : page),
+        };
       },
       async close() {
         record({ closed: state().closed + 1 });
