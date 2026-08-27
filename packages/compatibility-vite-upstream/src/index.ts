@@ -1,6 +1,16 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { delimiter, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContractValidators } from "@rsvite/compatibility-contract";
 
@@ -158,8 +168,67 @@ export function vitestTestNamePattern(fullName: string): string {
   return fullName.replaceAll(" > ", " ");
 }
 
-/** Paths are relative to the vendored copy. */
-export function adapterEntryFromManifest(manifest: unknown = readCorpusManifest()) {
+/** Staged, unstaged, or untracked paths, as `git status --porcelain` prints them. */
+export function gitWorktreePorcelain(cwd: string): string {
+  return execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
+}
+
+export function assertCleanGitWorktree(cwd: string): void {
+  const porcelain = gitWorktreePorcelain(cwd);
+  if (porcelain !== "") {
+    throw new Error(`git worktree is not clean:\n${porcelain}`);
+  }
+}
+
+/**
+ * Evidence paths in a committed result are relative to that result file. A missing or
+ * non-file path is not reproducible evidence.
+ */
+export function assertResultArtifactsExist(resultPath: string, result: unknown): void {
+  const record = asRecord(result);
+  const paths = record?.["artifactPaths"];
+  if (!Array.isArray(paths)) {
+    throw new Error(`${resultPath} has no artifactPaths array`);
+  }
+  const base = dirname(resultPath);
+  for (const [index, entry] of paths.entries()) {
+    if (typeof entry !== "string" || entry.length === 0) {
+      throw new Error(`${resultPath} artifactPaths[${String(index)}] is not a path`);
+    }
+    if (isAbsolute(entry) || entry.split(/[\\/]/).includes("..")) {
+      throw new Error(`${resultPath} artifactPaths[${String(index)}] is not a relative file path`);
+    }
+    const resolved = join(base, entry);
+    let stat;
+    try {
+      stat = statSync(resolved);
+    } catch {
+      throw new Error(`${resultPath} names missing evidence ${entry}`);
+    }
+    if (!stat.isFile()) {
+      throw new Error(`${resultPath} names non-file evidence ${entry}`);
+    }
+  }
+}
+
+/**
+ * The checkout must be the pinned commit with a clean worktree. Staged, unstaged, or
+ * untracked source is not that commit.
+ */
+export function assertPinnedCleanViteCheckout(checkout: string): void {
+  const head = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: checkout,
+    encoding: "utf8",
+  }).trim();
+  if (head !== VITE_UPSTREAM_COMMIT) {
+    throw new Error(`VITE_CHECKOUT HEAD is ${head}, expected ${VITE_UPSTREAM_COMMIT}`);
+  }
+  assertCleanGitWorktree(checkout);
+}
+
+function htmlPreserveCommentsEntry(
+  manifest: unknown = readCorpusManifest(),
+): Record<string, unknown> {
   const entries = asRecord(manifest)?.["entries"];
   if (!Array.isArray(entries)) throw new Error("the corpus manifest has no entries");
   const entry = asRecord(
@@ -168,13 +237,105 @@ export function adapterEntryFromManifest(manifest: unknown = readCorpusManifest(
   if (entry === undefined) {
     throw new Error(`the corpus manifest has no entry ${HTML_PRESERVE_COMMENTS_ENTRY_ID}`);
   }
-  const extension = asRecord(asRecord(entry["extensions"])?.["x-vite-upstream"]);
+  return entry;
+}
+
+/** Paths are relative to the vendored copy. */
+export function adapterEntryFromManifest(manifest: unknown = readCorpusManifest()) {
+  const extension = asRecord(
+    asRecord(htmlPreserveCommentsEntry(manifest)["extensions"])?.["x-vite-upstream"],
+  );
   return {
     entryId: HTML_PRESERVE_COMMENTS_ENTRY_ID,
     testName: requiredString(extension?.["testName"], "x-vite-upstream.testName"),
     spec: requiredString(extension?.["spec"], "x-vite-upstream.spec"),
     importedRoot: requiredString(extension?.["importedRoot"], "x-vite-upstream.importedRoot"),
   };
+}
+
+export function htmlPreserveCommentsPackageManager(manifest: unknown = readCorpusManifest()): {
+  name: string;
+  version: string;
+} {
+  const pm = asRecord(
+    asRecord(htmlPreserveCommentsEntry(manifest)["lockfile"])?.["packageManager"],
+  );
+  return {
+    name: requiredString(pm?.["name"], "lockfile.packageManager.name"),
+    version: requiredString(pm?.["version"], "lockfile.packageManager.version"),
+  };
+}
+
+export function htmlPreserveCommentsCommandExecutable(
+  commandName: "install" | "test",
+  manifest: unknown = readCorpusManifest(),
+): string {
+  const argv = asRecord(asRecord(htmlPreserveCommentsEntry(manifest)["commands"])?.[commandName])?.[
+    "argv"
+  ];
+  if (!Array.isArray(argv) || typeof argv[0] !== "string" || argv[0].length === 0) {
+    throw new Error(`commands.${commandName}.argv[0] is missing`);
+  }
+  return argv[0];
+}
+
+/** The adopted Vite baseline is Linux x64. Other hosts must not be labeled as that environment. */
+export function assertLinuxX64Host(
+  platform = process.platform,
+  arch = process.arch,
+): { os: string; arch: string } {
+  if (platform !== "linux" || arch !== "x64") {
+    throw new Error(`host is ${platform}/${arch}, expected linux/x64`);
+  }
+  return { os: platform, arch };
+}
+
+/**
+ * `--version` of the executable the runner will spawn. Pass the Vite checkout as `cwd`.
+ */
+export function assertPnpmVersion(
+  executable: string,
+  expectedVersion: string,
+  options: { cwd?: string } = {},
+): string {
+  const version = execFileSync(executable, ["--version"], {
+    encoding: "utf8",
+    cwd: options.cwd,
+  }).trim();
+  if (version !== expectedVersion) {
+    throw new Error(`${executable} --version is ${version}, expected ${expectedVersion}`);
+  }
+  return version;
+}
+
+export function corepackCachedPnpmCjs(version: string): string {
+  const home =
+    process.env["COREPACK_HOME"] ??
+    join(process.env["XDG_CACHE_HOME"] ?? join(homedir(), ".cache"), "node/corepack");
+  return join(home, "v1", "pnpm", version, "bin", "pnpm.cjs");
+}
+
+/**
+ * A Corepack parent already pinned to another pnpm cannot switch versions. Put a bare
+ * lockfile pnpm first on PATH so install and test spawn that version.
+ */
+export function ensureManifestPnpmOnPath(version: string): string {
+  execFileSync("corepack", ["install", "-g", `pnpm@${version}`, "--cache-only"], {
+    encoding: "utf8",
+  });
+  const pnpmCjs = corepackCachedPnpmCjs(version);
+  if (!existsSync(pnpmCjs)) {
+    throw new Error(`corepack did not cache pnpm@${version} at ${pnpmCjs}`);
+  }
+  const dir = mkdtempSync(join(tmpdir(), "rsvite-pnpm-"));
+  const wrapper = join(dir, "pnpm");
+  writeFileSync(
+    wrapper,
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(pnpmCjs)} "$@"\n`,
+  );
+  chmodSync(wrapper, 0o755);
+  process.env["PATH"] = `${dir}${delimiter}${process.env["PATH"] ?? ""}`;
+  return wrapper;
 }
 
 export const htmlPreserveCommentsAdapter = adapterEntryFromManifest();

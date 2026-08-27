@@ -16,6 +16,15 @@ manifest.
 `corpus/vite-upstream/`.
 
 The original Vite baseline for this entry is `corpus/results/vite-upstream-html-preserve-comments/vite/`,
-produced by `runCompatibilityCheck` against a checkout of the pinned commit. `vp run ready`
-re-validates that result with the corpus manifest. Regenerating it needs `VITE_CHECKOUT` pointing
-at that pin and `vp run record:vite-upstream:baseline`.
+produced by `runCompatibilityCheck` against a clean checkout of the pinned commit. `vp run ready`
+re-validates that result with the corpus manifest. Regenerating it:
+
+```sh
+VITE_CHECKOUT=/path/to/vite RUNNER_IMAGE=ubuntu-24.04 pnpm exec vp run record:vite-upstream:baseline
+```
+
+`VITE_CHECKOUT` and `RUNNER_IMAGE` are declared on that task so Vite+ forwards them. The checkout
+must be the pinned commit with no staged, unstaged, or untracked changes before and after the run.
+The recorder reads `process.platform` and `process.arch`. It puts the lockfile pnpm (`10.34.5`)
+first on PATH and checks `--version` in the Vite checkout, which is the command cwd. A host other
+than Linux x64, or a pnpm other than `10.34.5`, is rejected before the run.

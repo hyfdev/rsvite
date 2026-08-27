@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,7 +5,14 @@ import { runCompatibilityCheck } from "@rsvite/compatibility-runner";
 import {
   HTML_PRESERVE_COMMENTS_ENTRY_ID,
   VITE_UPSTREAM_COMMIT,
+  assertCleanGitWorktree,
+  assertLinuxX64Host,
+  assertPinnedCleanViteCheckout,
+  assertPnpmVersion,
+  ensureManifestPnpmOnPath,
   htmlPreserveCommentsAdapter,
+  htmlPreserveCommentsCommandExecutable,
+  htmlPreserveCommentsPackageManager,
   readCorpusManifest,
   viteBaselineDir,
 } from "../src/index.ts";
@@ -16,10 +22,20 @@ if (checkout === undefined || checkout.length === 0) {
   throw new Error("VITE_CHECKOUT must be the Vite repository pinned at the corpus commit");
 }
 
-const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: checkout, encoding: "utf8" }).trim();
-if (head !== VITE_UPSTREAM_COMMIT) {
-  throw new Error(`VITE_CHECKOUT HEAD is ${head}, expected ${VITE_UPSTREAM_COMMIT}`);
+const host = assertLinuxX64Host();
+const packageManager = htmlPreserveCommentsPackageManager();
+const installExecutable = htmlPreserveCommentsCommandExecutable("install");
+const testExecutable = htmlPreserveCommentsCommandExecutable("test");
+if (installExecutable !== testExecutable) {
+  throw new Error(`install uses ${installExecutable} but test uses ${testExecutable}`);
 }
+if (testExecutable !== packageManager.name) {
+  throw new Error(`commands start with ${testExecutable}, lockfile is ${packageManager.name}`);
+}
+
+assertPinnedCleanViteCheckout(checkout);
+ensureManifestPnpmOnPath(packageManager.version);
+const pnpmVersion = assertPnpmVersion(testExecutable, packageManager.version, { cwd: checkout });
 
 const packageJson = JSON.parse(
   readFileSync(join(checkout, "packages/vite/package.json"), "utf8"),
@@ -41,11 +57,11 @@ const report = await runCompatibilityCheck({
     commit: VITE_UPSTREAM_COMMIT,
   },
   environment: {
-    os: "linux",
-    arch: "x64",
+    os: host.os,
+    arch: host.arch,
     runnerImage: process.env["RUNNER_IMAGE"] ?? "local",
     nodeVersion: process.version.slice(1),
-    packageManager: { name: "pnpm", version: "10.34.5" },
+    packageManager: { name: packageManager.name, version: pnpmVersion },
   },
   projectRoot: checkout,
   artifactRoot: viteBaselineDir,
@@ -66,4 +82,5 @@ if (result.outcome !== "pass") {
   throw new Error(`Vite baseline was ${result.outcome}: ${JSON.stringify(report.failure)}`);
 }
 
+assertCleanGitWorktree(checkout);
 process.stdout.write(`${report.resultPath}\n`);

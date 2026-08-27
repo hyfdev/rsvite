@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createContractValidators } from "@rsvite/compatibility-contract";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -11,7 +11,16 @@ import {
   VITE_UPSTREAM_COMMIT,
   VITE_UPSTREAM_REPOSITORY,
   checkImportedFileProvenance,
+  assertCleanGitWorktree,
+  assertLinuxX64Host,
+  assertPinnedCleanViteCheckout,
+  assertPnpmVersion,
+  assertResultArtifactsExist,
+  corepackCachedPnpmCjs,
+  ensureManifestPnpmOnPath,
   htmlPreserveCommentsAdapter,
+  htmlPreserveCommentsCommandExecutable,
+  htmlPreserveCommentsPackageManager,
   readCorpusManifest,
   readProvenance,
   validateCorpusManifestDocument,
@@ -215,4 +224,117 @@ test("the committed Vite baseline is accepted with the corpus manifest", () => {
   assert.equal(asRecord(result["manifestEntry"])["id"], HTML_PRESERVE_COMMENTS_ENTRY_ID);
   assert.equal(asRecord(result["manifestEntry"])["sourceCommit"], VITE_UPSTREAM_COMMIT);
   assert.deepEqual(result["explicitFallbacks"], []);
+  assert.equal(asRecord(result["environment"])["os"], "linux");
+  assert.equal(asRecord(result["environment"])["arch"], "x64");
+  assert.equal(asRecord(asRecord(result["environment"])["packageManager"])["name"], "pnpm");
+  assert.equal(asRecord(asRecord(result["environment"])["packageManager"])["version"], "10.34.5");
+  assertResultArtifactsExist(viteBaselineResultPath, result);
+});
+
+test("a committed result that names missing evidence is rejected", () => {
+  const result = JSON.parse(readFileSync(viteBaselineResultPath, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const missing = { ...result, artifactPaths: ["does-not-exist.log"] };
+  assert.throws(
+    () => assertResultArtifactsExist(viteBaselineResultPath, missing),
+    /missing evidence does-not-exist\.log/,
+  );
+});
+
+test("the record task passes VITE_CHECKOUT and RUNNER_IMAGE through Vite+", () => {
+  const config = readFileSync(join(testsDir, "../../../vite.config.ts"), "utf8");
+  assert.match(config, /"record:vite-upstream:baseline"/);
+  assert.match(config, /env:\s*\[\s*"VITE_CHECKOUT",\s*"RUNNER_IMAGE"\s*\]/);
+});
+
+function initTempGitRepo(): string {
+  const dir = mkdtempSync(join("/tmp", "rsvite-git-"));
+  execFileSync("git", ["init", "-b", "main"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "test"], { cwd: dir });
+  writeFileSync(join(dir, "tracked.txt"), "ok\n");
+  execFileSync("git", ["add", "tracked.txt"], { cwd: dir });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: dir });
+  return dir;
+}
+
+test("a checkout with staged, unstaged, or untracked changes is not recorded as the pin", () => {
+  const dir = initTempGitRepo();
+  try {
+    assertCleanGitWorktree(dir);
+
+    writeFileSync(join(dir, "untracked.txt"), "x\n");
+    assert.throws(() => assertCleanGitWorktree(dir), /not clean/);
+    rmSync(join(dir, "untracked.txt"));
+    assertCleanGitWorktree(dir);
+
+    writeFileSync(join(dir, "tracked.txt"), "dirty\n");
+    assert.throws(() => assertCleanGitWorktree(dir), /not clean/);
+    execFileSync("git", ["checkout", "--", "tracked.txt"], { cwd: dir });
+    assertCleanGitWorktree(dir);
+
+    writeFileSync(join(dir, "tracked.txt"), "staged\n");
+    execFileSync("git", ["add", "tracked.txt"], { cwd: dir });
+    assert.throws(() => assertCleanGitWorktree(dir), /not clean/);
+
+    assert.throws(() => assertPinnedCleanViteCheckout(dir), /HEAD is/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a host that is not Linux x64 is not recorded as the baseline environment", () => {
+  assert.throws(() => assertLinuxX64Host("darwin", "x64"), /darwin\/x64/);
+  assert.throws(() => assertLinuxX64Host("linux", "arm64"), /linux\/arm64/);
+  assert.deepEqual(assertLinuxX64Host("linux", "x64"), { os: "linux", arch: "x64" });
+});
+
+test("a pnpm that is not the lockfile version is not recorded as that version", () => {
+  const dir = mkdtempSync(join("/tmp", "rsvite-pnpm-"));
+  const other = mkdtempSync(join("/tmp", "rsvite-pnpm-"));
+  const fake = join(dir, "pnpm");
+  const expected = htmlPreserveCommentsPackageManager().version;
+  try {
+    writeFileSync(
+      fake,
+      `#!${process.execPath}
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
+process.stdout.write(readFileSync(join(process.cwd(), "version.txt"), "utf8"));
+`,
+    );
+    chmodSync(fake, 0o755);
+    writeFileSync(join(dir, "version.txt"), "9.15.0\n");
+    writeFileSync(join(other, "version.txt"), `${expected}\n`);
+    assert.throws(() => assertPnpmVersion(fake, expected, { cwd: dir }), /9\.15\.0/);
+    assert.equal(assertPnpmVersion(fake, expected, { cwd: other }), expected);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+  }
+});
+
+test("manifest install and test commands start with the lockfile package manager", () => {
+  const packageManager = htmlPreserveCommentsPackageManager();
+  assert.equal(packageManager.name, "pnpm");
+  assert.equal(packageManager.version, "10.34.5");
+  assert.equal(htmlPreserveCommentsCommandExecutable("install"), "pnpm");
+  assert.equal(htmlPreserveCommentsCommandExecutable("test"), "pnpm");
+});
+
+test("the lockfile pnpm can be spawned while the parent session is another pnpm", () => {
+  const expected = htmlPreserveCommentsPackageManager().version;
+  const previousPath = process.env["PATH"];
+  try {
+    execFileSync("corepack", ["install", "-g", `pnpm@${expected}`, "--cache-only"], {
+      encoding: "utf8",
+    });
+    assert.equal(existsSync(corepackCachedPnpmCjs(expected)), true);
+    ensureManifestPnpmOnPath(expected);
+    assert.equal(assertPnpmVersion("pnpm", expected), expected);
+  } finally {
+    process.env["PATH"] = previousPath;
+  }
 });

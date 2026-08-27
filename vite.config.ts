@@ -2,11 +2,7 @@ import { defineConfig } from "vite-plus";
 
 export default defineConfig({
   fmt: {
-    ignorePatterns: [
-      "corpus/vite-upstream",
-      "packages/compatibility-vite-upstream/tests/fixtures",
-      "packages/compatibility-vite-upstream/scripts",
-    ],
+    ignorePatterns: ["corpus/vite-upstream", "packages/compatibility-vite-upstream/tests/fixtures"],
     overrides: [
       {
         files: ["**/*.md"],
@@ -15,11 +11,7 @@ export default defineConfig({
     ],
   },
   lint: {
-    ignorePatterns: [
-      "corpus/vite-upstream",
-      "packages/compatibility-vite-upstream/tests/fixtures",
-      "packages/compatibility-vite-upstream/scripts",
-    ],
+    ignorePatterns: ["corpus/vite-upstream", "packages/compatibility-vite-upstream/tests/fixtures"],
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
     rules: {
       "unicorn/prefer-node-protocol": "error",
@@ -50,6 +42,7 @@ export default defineConfig({
       "record:vite-upstream:baseline": {
         command:
           "node --experimental-strip-types packages/compatibility-vite-upstream/scripts/record-vite-baseline.mts",
+        env: ["VITE_CHECKOUT", "RUNNER_IMAGE"],
       },
       ready: {
         command: "echo ready checks passed",
