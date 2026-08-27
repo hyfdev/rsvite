@@ -241,6 +241,28 @@ importers:
         specifier: 'catalog:'
         version: 0.2.8(@types/node@22.20.0)(@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2))(typescript@7.0.2)
 
+  packages/compatibility-actual-budget:
+    dependencies:
+      '@rsvite/compatibility-contract':
+        specifier: workspace:*
+        version: link:../compatibility-contract
+      '@rsvite/compatibility-runner':
+        specifier: workspace:*
+        version: link:../compatibility-runner
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.0
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite:
+        specifier: 'catalog:'
+        version: '@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2)'
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.2.8(@types/node@22.20.0)(@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2))(typescript@7.0.2)
+
   packages/compatibility-contract:
     dependencies:
       ajv:

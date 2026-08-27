@@ -49,6 +49,86 @@
           "mode": "serve"
         }
       }
+    },
+    {
+      "id": "actual-budget",
+      "kind": "real-project",
+      "source": {
+        "repository": "https://github.com/actualbudget/actual",
+        "commit": "766cc8a7244c35f575ecc33a7a718b060cb5d496",
+        "license": {
+          "spdxId": "MIT",
+          "path": "LICENSE.txt"
+        }
+      },
+      "lockfile": {
+        "path": "yarn.lock",
+        "packageManager": {
+          "name": "yarn",
+          "version": "4.17.1"
+        }
+      },
+      "commands": {
+        "install": {
+          "argv": ["corepack", "yarn", "install", "--immutable"]
+        },
+        "dev": {
+          "argv": ["corepack", "yarn", "start"],
+          "env": {
+            "BROWSER": "none",
+            "PORT": "3001"
+          }
+        },
+        "build": {
+          "argv": ["corepack", "yarn", "build:browser"]
+        },
+        "preview": {
+          "argv": ["node", "packages/desktop-client/bin/serve-build.mjs"],
+          "env": {
+            "BROWSER": "none",
+            "PORT": "3001"
+          }
+        }
+      },
+      "readiness": {
+        "type": "http-ready",
+        "urlPath": "/",
+        "expectStatus": 200,
+        "timeoutMs": 300000
+      },
+      "browserAcceptance": {
+        "entryPath": "/",
+        "mainFrameNavigationIsFailure": true,
+        "hmr": {
+          "sentinelExpression": "globalThis.__rsviteHmrSentinel",
+          "sentinelStorage": "in-memory",
+          "edit": {
+            "path": "packages/desktop-client/src/components/manager/WelcomeScreen.tsx",
+            "find": "<Trans>Welcome to Actual</Trans>",
+            "replace": "<Trans>Welcome to Actual (rsvite update probe)</Trans>"
+          },
+          "expectedText": "Welcome to Actual (rsvite update probe)"
+        }
+      },
+      "expectedCapabilities": [
+        "html",
+        "modules-and-assets",
+        "resolution",
+        "file-watching",
+        "hmr-without-full-reload",
+        "build-output"
+      ],
+      "javascriptApiLevel": "C1",
+      "notes": "Complex React monorepo gate. The adapter drives the project's own onboarding E2E spec and build, and changes none of its expectations. The HMR probe edits one source file and restores it after the run. Every fixed input is verified before and after each run, including the ignored translations checkout the production build compiles in.",
+      "extensions": {
+        "x-actual-budget": {
+          "translations": {
+            "repository": "https://github.com/actualbudget/translations",
+            "commit": "05d15e964dd8a16516d8ba6508ed405554a2e3ec",
+            "path": "packages/desktop-client/locale"
+          }
+        }
+      }
     }
   ]
 }

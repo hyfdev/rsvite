@@ -1,0 +1,29 @@
+{
+  "repository": "https://github.com/actualbudget/actual",
+  "commit": "766cc8a7244c35f575ecc33a7a718b060cb5d496",
+  "license": {
+    "spdxId": "MIT",
+    "path": "LICENSE.txt"
+  },
+  "lockfile": {
+    "path": "yarn.lock",
+    "packageManager": {
+      "name": "yarn",
+      "version": "4.17.1"
+    }
+  },
+  "entryId": "actual-budget",
+  "e2eSpec": "packages/desktop-client/e2e/onboarding.test.ts",
+  "sentinelEditPath": "packages/desktop-client/src/components/manager/WelcomeScreen.tsx",
+  "devPort": 3001,
+  "sentinelEdit": {
+    "find": "<Trans>Welcome to Actual</Trans>",
+    "replace": "<Trans>Welcome to Actual (rsvite update probe)</Trans>",
+    "expectedText": "Welcome to Actual (rsvite update probe)"
+  },
+  "translations": {
+    "repository": "https://github.com/actualbudget/translations",
+    "commit": "05d15e964dd8a16516d8ba6508ed405554a2e3ec",
+    "path": "packages/desktop-client/locale"
+  }
+}

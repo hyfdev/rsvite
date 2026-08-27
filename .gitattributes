@@ -1,1 +1,5 @@
 corpus/vite-upstream/** linguist-vendored
+
+# Recorded evidence is kept exactly as the tool printed it. Reformatting a log — even removing
+# trailing spaces — would make the committed bytes stop matching what the run produced.
+corpus/results/**/*.log -whitespace

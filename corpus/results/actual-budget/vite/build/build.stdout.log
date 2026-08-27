@@ -1,0 +1,119 @@
+Updating translations...
+Already up to date.
+en.json has 2698 keys.
+af.json has 0 keys (0.00%).
+Deleted af.json due to insufficient keys.
+aii.json has 0 keys (0.00%).
+Deleted aii.json due to insufficient keys.
+ar.json has 449 keys (16.64%).
+Deleted ar.json due to insufficient keys.
+ars.json has 0 keys (0.00%).
+Deleted ars.json due to insufficient keys.
+bg.json has 0 keys (0.00%).
+Deleted bg.json due to insufficient keys.
+bn.json has 0 keys (0.00%).
+Deleted bn.json due to insufficient keys.
+ca.json has 1891 keys (70.09%).
+Keeping ca.json.
+cs.json has 234 keys (8.67%).
+Deleted cs.json due to insufficient keys.
+da.json has 1222 keys (45.29%).
+Deleted da.json due to insufficient keys.
+de.json has 2074 keys (76.87%).
+Keeping de.json.
+el.json has 0 keys (0.00%).
+Deleted el.json due to insufficient keys.
+Keeping en-GB.json as it's an English language.
+eo.json has 0 keys (0.00%).
+Deleted eo.json due to insufficient keys.
+es.json has 1877 keys (69.57%).
+Keeping es.json.
+et.json has 9 keys (0.33%).
+Deleted et.json due to insufficient keys.
+fa.json has 3 keys (0.11%).
+Deleted fa.json due to insufficient keys.
+fi.json has 190 keys (7.04%).
+Deleted fi.json due to insufficient keys.
+fil.json has 0 keys (0.00%).
+Deleted fil.json due to insufficient keys.
+fr-CA.json has 0 keys (0.00%).
+Deleted fr-CA.json due to insufficient keys.
+fr.json has 1926 keys (71.39%).
+Keeping fr.json.
+gl.json has 0 keys (0.00%).
+Deleted gl.json due to insufficient keys.
+he.json has 18 keys (0.67%).
+Deleted he.json due to insufficient keys.
+hi.json has 0 keys (0.00%).
+Deleted hi.json due to insufficient keys.
+hu.json has 40 keys (1.48%).
+Deleted hu.json due to insufficient keys.
+id.json has 28 keys (1.04%).
+Deleted id.json due to insufficient keys.
+it.json has 1764 keys (65.38%).
+Keeping it.json.
+ja.json has 10 keys (0.37%).
+Deleted ja.json due to insufficient keys.
+ko.json has 141 keys (5.23%).
+Deleted ko.json due to insufficient keys.
+lt.json has 39 keys (1.45%).
+Deleted lt.json due to insufficient keys.
+nb-NO.json has 1677 keys (62.16%).
+Keeping nb-NO.json.
+nl.json has 1708 keys (63.31%).
+Keeping nl.json.
+pl.json has 1583 keys (58.67%).
+Keeping pl.json.
+pt-BR.json has 2018 keys (74.80%).
+Keeping pt-BR.json.
+pt.json has 154 keys (5.71%).
+Deleted pt.json due to insufficient keys.
+ro.json has 9 keys (0.33%).
+Deleted ro.json due to insufficient keys.
+ru.json has 1627 keys (60.30%).
+Keeping ru.json.
+sk.json has 264 keys (9.79%).
+Deleted sk.json due to insufficient keys.
+sl.json has 11 keys (0.41%).
+Deleted sl.json due to insufficient keys.
+sq.json has 0 keys (0.00%).
+Deleted sq.json due to insufficient keys.
+sr.json has 0 keys (0.00%).
+Deleted sr.json due to insufficient keys.
+sv.json has 972 keys (36.03%).
+Deleted sv.json due to insufficient keys.
+ta.json has 0 keys (0.00%).
+Deleted ta.json due to insufficient keys.
+th.json has 1221 keys (45.26%).
+Deleted th.json due to insufficient keys.
+tr.json has 149 keys (5.52%).
+Deleted tr.json due to insufficient keys.
+uk.json has 1730 keys (64.12%).
+Keeping uk.json.
+vi.json has 75 keys (2.78%).
+Deleted vi.json due to insufficient keys.
+zh-Hans.json has 1511 keys (56.00%).
+Keeping zh-Hans.json.
+zh-Hant.json has 1675 keys (62.08%).
+Keeping zh-Hant.json.
+Processing completed.
+[31mplugins-service[39m [96mbuild[39m [37m[33m…[39m[37m queued[39m
+[93m@actual-app/crdt[39m [96mbuild[39m [37m[33m…[39m[37m queued[39m
+[31mplugins-service[39m [96mbuild[39m [37m[32m➔[39m[37m start[39m
+[93m@actual-app/crdt[39m [96mbuild[39m [37m[32m➔[39m[37m start[39m
+[31mplugins-service[39m [96mbuild[39m [37m[32m»[39m[37m skip - 30be54c7e4d62a5f8fd35c6e78f8e3173522f548[39m
+[93m@actual-app/crdt[39m [96mbuild[39m [37m[32m»[39m[37m skip - e1ffed8b8312f22bd8b041ca5fbbea4af220d122[39m
+[31m@actual-app/core[39m [96mbuild[39m [37m[33m…[39m[37m queued[39m
+[31m@actual-app/core[39m [96mbuild[39m [37m[32m➔[39m[37m start[39m
+[31m@actual-app/core[39m [96mbuild[39m [37m[32m»[39m[37m skip - a3ebd45d726176058c67a5427af469e26548196d[39m
+[97m@actual-app/web[39m [96mbuild:browser[39m [37m[33m…[39m[37m queued[39m
+[97m@actual-app/web[39m [96mbuild:browser[39m [37m[32m➔[39m[37m start[39m
+[97m@actual-app/web[39m [96mbuild:browser[39m [37m[32m✓[39m[37m done - 25.54s[39m
+[96m[39m
+[96mSummary[39m
+┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
+[97m@actual-app/web[39m [96mbuild:browser[39m [92msuccess, took 25.54s, queued for 0.00s[39m
+success: 1, skipped: 3, pending: 0, aborted: 0, failed: 0
+worker restarts: 0, max worker memory usage: 25.93 MB
+┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
+Took a total of 25.77s to complete. 

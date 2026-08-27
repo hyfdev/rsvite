@@ -1,0 +1,30 @@
+{
+  "name": "@rsvite/compatibility-actual-budget",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pinned Actual Budget validation adapter and its Vite baseline.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyfdev/rsvite.git",
+    "directory": "packages/compatibility-actual-budget"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "check": "vp check",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "@rsvite/compatibility-contract": "workspace:*",
+    "@rsvite/compatibility-runner": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

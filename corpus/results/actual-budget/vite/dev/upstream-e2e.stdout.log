@@ -1,0 +1,11 @@
+
+[2mRunning [22m6[2m tests using [22m1[2m worker[22m
+
+  [32m✓[39m  [2m1 [22m[chromium] › e2e/onboarding.test.ts:26:7 › Onboarding › checks the page visuals[2m (2.7s)[22m
+  [32m✓[39m  [2m2 [22m[chromium] › e2e/onboarding.test.ts:35:7 › Onboarding › creates a new budget file by importing YNAB4 budget[2m (7.4s)[22m
+  [32m✓[39m  [2m3 [22m[chromium] › e2e/onboarding.test.ts:52:7 › Onboarding › creates a new budget file by importing nYNAB budget[2m (5.0s)[22m
+  [32m✓[39m  [2m4 [22m[chromium] › e2e/onboarding.test.ts:93:7 › Onboarding › creates a new budget file by importing Actual budget[2m (4.4s)[22m
+  [32m✓[39m  [2m5 [22m[chromium] › e2e/onboarding.test.ts:108:7 › Onboarding › creates a new empty budget file[2m (3.5s)[22m
+  [32m✓[39m  [2m6 [22m[chromium] › e2e/onboarding.test.ts:119:7 › Onboarding › navigates back to start page by clicking on "no server" in an empty budget file[2m (3.8s)[22m
+
+[32m  6 passed[39m[2m (27.4s)[22m
