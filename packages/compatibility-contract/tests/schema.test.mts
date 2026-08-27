@@ -32,6 +32,7 @@ const rejectedManifests: Record<string, string> = {
   "real-project-without-dev-command.json": "/entries/0/commands",
   "source-pinned-to-a-branch.json": "/entries/0/source/commit",
   "source-without-license.json": "/entries/0/source",
+  "unknown-capability.json": "/entries/0/expectedCapabilities/0",
   "unnamespaced-adapter-extension.json": "/entries/0/extensions",
 };
 
@@ -109,6 +110,15 @@ test("every rejected raw result example is rejected at the documented location",
       `${name} should be rejected at "${rejectedResults[name]}", got ${violationPaths(result).join(", ")}`,
     );
   }
+});
+
+test("an input that only serves an HTML entry can say so", () => {
+  const manifest = readExample("corpus-manifest/valid/html-entry-slice.json") as {
+    entries: { expectedCapabilities: string[] }[];
+  };
+
+  assert.deepEqual(manifest.entries[0]?.expectedCapabilities, ["html"]);
+  assert.equal(validators.validateCorpusManifest(manifest).valid, true);
 });
 
 test("a document from the wrong side of the contract is rejected", () => {

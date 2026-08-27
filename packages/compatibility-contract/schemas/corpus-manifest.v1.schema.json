@@ -340,6 +340,7 @@
     },
     "capability": {
       "enum": [
+        "html",
         "modules-and-assets",
         "resolution",
         "errors",
@@ -350,7 +351,8 @@
         "workers",
         "ssr",
         "framework-lifecycle"
-      ]
+      ],
+      "description": "Observable product capabilities, named as the product capability record names them. `html` covers HTML entry discovery and serving, and HTML response behavior."
     },
     "javascriptApiLevel": {
       "description": "Declared JavaScript API level this entry is measured at.",

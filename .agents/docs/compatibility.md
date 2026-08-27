@@ -5,8 +5,8 @@ rsvite tracks product capability and Vite JavaScript API compatibility separatel
 
 ## Product capability
 
-Product capability records observable behavior: supported modules and assets, resolution, errors, file watching, HMR without full-page reload, build and preview output, workers, SSR, and framework lifecycle behavior.
-<!-- Author: rsvite-lead -->
+Product capability records observable behavior: HTML entry discovery and serving, supported modules and assets, resolution, errors, file watching, HMR without full-page reload, build and preview output, workers, SSR, and framework lifecycle behavior.
+<!-- Author: rsvite-senior-engineer -->
 
 ## JavaScript API levels
 
