@@ -24,7 +24,14 @@
           "argv": ["pnpm", "install", "--frozen-lockfile"]
         },
         "test": {
-          "argv": ["pnpm", "test-serve", "playground/html"]
+          "argv": [
+            "pnpm",
+            "test-serve",
+            "playground/html",
+            "--",
+            "--testNamePattern",
+            "main > preserve comments"
+          ]
         }
       },
       "readiness": {

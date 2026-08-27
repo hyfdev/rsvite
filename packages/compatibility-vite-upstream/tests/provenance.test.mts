@@ -113,13 +113,29 @@ test("the corpus manifest is accepted by the canonical validator", () => {
   assert.equal(asRecord(entry["source"])["commit"], VITE_UPSTREAM_COMMIT);
   assert.equal(asRecord(entry["source"])["repository"], VITE_UPSTREAM_REPOSITORY);
   assert.equal(asRecord(asRecord(entry["source"])["license"])["path"], "LICENSE");
-  assert.deepEqual(asRecord(entry["commands"])["test"], {
-    argv: ["pnpm", "test-serve", "playground/html"],
-  });
   assert.equal(asRecord(asRecord(entry["lockfile"])["packageManager"])["version"], "10.34.5");
 
   assert.equal(htmlPreserveCommentsAdapter.entryId, HTML_PRESERVE_COMMENTS_ENTRY_ID);
-  assert.equal(htmlPreserveCommentsAdapter.testName, "main > preserve comments");
   assert.equal(htmlPreserveCommentsAdapter.spec, "playground/html/__tests__/html.spec.ts");
   assert.equal(htmlPreserveCommentsAdapter.importedRoot, "playground/html");
+});
+
+test("the corpus test command selects the extension testName", () => {
+  const manifest = readCorpusManifest();
+  const entry = asRecord((asRecord(manifest)["entries"] as unknown[])[0]!);
+  const argv = asRecord(asRecord(entry["commands"])["test"])["argv"];
+  assert.ok(Array.isArray(argv));
+  const command = argv.map((part) => {
+    assert.equal(typeof part, "string");
+    return part as string;
+  });
+
+  const testName = htmlPreserveCommentsAdapter.testName;
+  assert.equal(testName, "main > preserve comments");
+  const patternFlag = command.indexOf("--testNamePattern");
+  assert.ok(patternFlag >= 0, "the Vite test-serve command must pass --testNamePattern");
+  assert.equal(command[patternFlag + 1], testName);
+  assert.equal(command[0], "pnpm");
+  assert.equal(command[1], "test-serve");
+  assert.ok(command.includes(htmlPreserveCommentsAdapter.importedRoot));
 });
