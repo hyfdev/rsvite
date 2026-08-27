@@ -297,14 +297,7 @@ test("a pnpm that is not the lockfile version is not recorded as that version", 
   const fake = join(dir, "pnpm");
   const expected = htmlPreserveCommentsPackageManager().version;
   try {
-    writeFileSync(
-      fake,
-      `#!${process.execPath}
-const { readFileSync } = require("node:fs");
-const { join } = require("node:path");
-process.stdout.write(readFileSync(join(process.cwd(), "version.txt"), "utf8"));
-`,
-    );
+    writeFileSync(fake, '#!/bin/sh\ncat "$PWD/version.txt"\n');
     chmodSync(fake, 0o755);
     writeFileSync(join(dir, "version.txt"), "9.15.0\n");
     writeFileSync(join(other, "version.txt"), `${expected}\n`);
