@@ -6,7 +6,7 @@
   },
   "subject": {
     "name": "vite",
-    "version": "nuxt-dev"
+    "version": "7.3.5"
   },
   "environment": {
     "os": "linux",
@@ -24,11 +24,11 @@
   },
   "command": {
     "argv": ["node", ".output/server/index.mjs"],
-    "cwd": "/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7",
+    "cwd": "/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7-rerecord",
     "exitCode": 0
   },
-  "startedAt": "2026-08-27T14:19:17.909Z",
-  "finishedAt": "2026-08-27T14:19:18.654Z",
+  "startedAt": "2026-08-27T15:42:57.584Z",
+  "finishedAt": "2026-08-27T15:42:58.463Z",
   "outcome": "pass",
   "javascriptApiLevel": "C3",
   "capabilityOwners": [
@@ -60,5 +60,13 @@
     "install.stderr.log",
     "preview.stdout.log",
     "preview.stderr.log"
-  ]
+  ],
+  "extensions": {
+    "x-elk": {
+      "ignoredPageError": "NotSupportedError: Model not available",
+      "viteVersion": "7.3.5",
+      "nuxtVersion": "4.4.7",
+      "nitroVersion": "2.13.4"
+    }
+  }
 }

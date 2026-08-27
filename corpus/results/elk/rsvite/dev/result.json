@@ -23,12 +23,12 @@
     }
   },
   "command": {
-    "argv": ["npx", "--no-install", "rsvite", ".", "--port", "42205"],
-    "cwd": "/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7",
+    "argv": ["npx", "--no-install", "rsvite", ".", "--port", "40405"],
+    "cwd": "/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7-rerecord",
     "exitCode": 1
   },
-  "startedAt": "2026-08-27T14:19:18.693Z",
-  "finishedAt": "2026-08-27T14:19:22.018Z",
+  "startedAt": "2026-08-27T15:42:58.543Z",
+  "finishedAt": "2026-08-27T15:43:02.453Z",
   "outcome": "fail",
   "javascriptApiLevel": "C0",
   "capabilityOwners": [
@@ -76,5 +76,13 @@
   "failureClassification": {
     "kind": "current-compatibility-requirement",
     "evidence": "rsvite failed during dev before ELK could exercise the selected dev capabilities: the command exited before it reported readiness"
+  },
+  "extensions": {
+    "x-elk": {
+      "ignoredPageError": "NotSupportedError: Model not available",
+      "viteVersion": "7.3.5",
+      "nuxtVersion": "4.4.7",
+      "nitroVersion": "2.13.4"
+    }
   }
 }

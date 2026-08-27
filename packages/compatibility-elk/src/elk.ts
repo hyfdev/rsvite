@@ -1,9 +1,10 @@
 import { createServer } from "node:net";
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm, stat, utimes } from "node:fs/promises";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { createContractValidators } from "@rsvite/compatibility-contract";
 import {
   runCommand,
   runCompatibilityCheck,
@@ -22,6 +23,8 @@ import {
   declaredElkRun,
   ELK_COMMIT,
   ELK_ENTRY_ID,
+  ELK_HMR_FIND,
+  ELK_HMR_REPLACE,
   ELK_HMR_STYLESHEET,
   ELK_HOME_PATH,
   ELK_PNPM_VERSION,
@@ -29,13 +32,24 @@ import {
   ELK_SENTINEL,
   type ElkSubject,
 } from "./manifest.ts";
+import {
+  summarizeColdPhase,
+  waitForObservedStability,
+  type ColdPhase,
+  type StabilityOptions,
+} from "./stability.ts";
 
 const INSTALL_TIMEOUT_MS = 600_000;
 const LIFECYCLE_TIMEOUT_MS = 900_000;
-const BROWSER_TIMEOUT_MS = 120_000;
+const BROWSER_TIMEOUT_MS = 600_000;
 const PAGE_SETTLE_MS = 1_000;
-const PAGE_PROBE_TIMEOUT_MS = 60_000;
-const COLD_RELOAD_WAIT_MS = 8_000;
+const PAGE_PROBE_TIMEOUT_MS = 180_000;
+const IGNORED_PAGE_ERROR = "NotSupportedError: Model not available";
+const BUILD_OUTPUTS = [
+  ".output/public/elk-sw.js",
+  ".output/public/index.html",
+  ".output/server/index.mjs",
+] as const;
 
 export interface ElkCheckout {
   readonly path: string;
@@ -176,7 +190,18 @@ async function waitForExpression(
     }
     await sleep(100, signal);
   }
-  throw new Error(`ELK browser acceptance did not reach ${description}`);
+  let snapshot = "";
+  try {
+    snapshot = String(
+      await page.evaluate(
+        `JSON.stringify({ path: location.pathname, text: (document.body?.innerText ?? "").slice(0, 240) })`,
+        signal,
+      ),
+    );
+  } catch (error) {
+    snapshot = `unavailable: ${String(error)}`;
+  }
+  throw new Error(`ELK browser acceptance did not reach ${description} (${snapshot})`);
 }
 
 const HOME_READY = `(() => {
@@ -205,23 +230,62 @@ const CLICK_HOME = `(() => {
   return true;
 })()`;
 
-function createElkBrowserAdapter(): BrowserAdapter {
-  const adapter = createChromiumBrowserAdapter();
+export interface ElkBrowserAdapter extends BrowserAdapter {
+  takeColdPhase(): ColdPhase | undefined;
+}
+
+export interface ElkBrowserAdapterOptions extends StabilityOptions {
+  readonly inner?: BrowserAdapter;
+}
+
+export function createElkBrowserAdapter(options: ElkBrowserAdapterOptions = {}): ElkBrowserAdapter {
+  const inner = options.inner ?? createChromiumBrowserAdapter();
+  const stability: StabilityOptions = {
+    ...(options.pollMs !== undefined ? { pollMs: options.pollMs } : {}),
+    ...(options.quietObservations !== undefined
+      ? { quietObservations: options.quietObservations }
+      : {}),
+    ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    ...(options.sleep !== undefined ? { sleep: options.sleep } : {}),
+  };
+  let coldPhase: ColdPhase | undefined;
+
   return {
+    takeColdPhase(): ColdPhase | undefined {
+      const value = coldPhase;
+      coldPhase = undefined;
+      return value;
+    },
     async open(request): Promise<BrowserPage> {
-      const page = await adapter.open(request);
+      if (new URL(request.url).pathname !== ELK_HOME_PATH) {
+        return inner.open(request);
+      }
+
+      const warmup = await inner.open(request);
+      let page: BrowserPage | undefined;
       try {
-        const pathname = new URL(request.url).pathname;
-        if (pathname !== ELK_HOME_PATH) return page;
-        await waitForExpression(page, HOME_READY, request.signal, "the mocked /home timeline");
-        await sleep(COLD_RELOAD_WAIT_MS, request.signal);
+        await waitForExpression(warmup, HOME_READY, request.signal, "the mocked /home timeline");
+        const warmupEvents = await waitForObservedStability(warmup, request.signal, stability);
         await waitForExpression(
-          page,
+          warmup,
           HOME_READY,
           request.signal,
           "the mocked /home timeline after optimize-deps",
         );
-        discardMainFrameNavigations(page);
+        warmupEvents.push(...warmup.drainEvents());
+        await warmup.close(request.signal);
+
+        page = await inner.open(request);
+        await waitForExpression(
+          page,
+          HOME_READY,
+          request.signal,
+          "the mocked /home timeline on the acceptance page",
+        );
+        const settleEvents = await waitForObservedStability(page, request.signal, stability);
+        const coldEvents = [...warmupEvents, ...settleEvents];
+        coldPhase = { cacheState: "warm", events: coldEvents };
+
         await waitForExpression(page, CLICK_EXPLORE, request.signal, "the Explore control");
         await waitForExpression(page, EXPLORE_READY, request.signal, "the Explore page");
         await waitForExpression(page, CLICK_HOME, request.signal, "the Home control");
@@ -239,7 +303,8 @@ function createElkBrowserAdapter(): BrowserAdapter {
         return page;
       } catch (error) {
         const cleanup = new AbortController();
-        await page.close(cleanup.signal).catch(() => undefined);
+        await warmup.close(cleanup.signal).catch(() => undefined);
+        if (page !== undefined) await page.close(cleanup.signal).catch(() => undefined);
         throw error;
       }
     },
@@ -252,8 +317,11 @@ async function updateElk(
   projectRoot: string,
 ): Promise<void> {
   const source = join(projectRoot, ELK_HMR_STYLESHEET);
-  const metadata = await stat(source);
-  await utimes(source, metadata.atime, new Date());
+  const original = await readFile(source, "utf8");
+  if (!original.includes(ELK_HMR_FIND)) {
+    throw new Error(`ELK HMR stylesheet does not contain the declared find text`);
+  }
+  await writeFile(source, original.replace(ELK_HMR_FIND, ELK_HMR_REPLACE));
   await sleep(PAGE_SETTLE_MS, signal);
   await waitForExpression(
     page,
@@ -261,6 +329,97 @@ async function updateElk(
     signal,
     "the mocked /home timeline after the Vite update",
   );
+}
+
+async function restoreElkStylesheet(projectRoot: string): Promise<void> {
+  const source = join(projectRoot, ELK_HMR_STYLESHEET);
+  if (!existsSync(source)) return;
+  const current = await readFile(source, "utf8");
+  if (!current.includes(ELK_HMR_REPLACE)) return;
+  await writeFile(source, current.replace(ELK_HMR_REPLACE, ELK_HMR_FIND));
+}
+
+async function wipeViteOptimizerCache(projectRoot: string): Promise<void> {
+  await rm(join(projectRoot, "node_modules/.cache/vite"), { force: true, recursive: true });
+  await rm(join(projectRoot, ".nuxt"), { force: true, recursive: true });
+}
+
+function readInstalledVersion(projectRoot: string, packageName: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(join(projectRoot, "node_modules", packageName, "package.json"), "utf8"),
+    );
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+    const version = (parsed as { version?: unknown }).version;
+    return typeof version === "string" ? version : undefined;
+  } catch {
+    try {
+      const lockfile = readFileSync(join(projectRoot, "pnpm-lock.yaml"), "utf8");
+      const match = lockfile.match(new RegExp(`(?:^|\\n)\\s+${packageName}@([^:\\s(]+):`));
+      return match?.[1];
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function annotateElkResult(
+  report: RunReport,
+  manifest: unknown,
+  annotation: {
+    readonly viteVersion?: string;
+    readonly nuxtVersion?: string;
+    readonly nitroVersion?: string;
+    readonly coldPhase?: ColdPhase;
+    readonly hmrUpdate?: Record<string, unknown>;
+    readonly buildOutputs?: readonly string[];
+  },
+): void {
+  const result = asRecord(structuredClone(report.result));
+  if (result === undefined) throw new Error("the ELK result is not an object");
+  const subject = asRecord(result["subject"]);
+  if (subject === undefined) throw new Error("the ELK result has no subject");
+  if (annotation.viteVersion !== undefined && subject["name"] === "vite") {
+    subject["version"] = annotation.viteVersion;
+  }
+
+  const xelk: Record<string, unknown> = {
+    ignoredPageError: IGNORED_PAGE_ERROR,
+  };
+  if (annotation.viteVersion !== undefined) xelk["viteVersion"] = annotation.viteVersion;
+  if (annotation.nuxtVersion !== undefined) xelk["nuxtVersion"] = annotation.nuxtVersion;
+  if (annotation.nitroVersion !== undefined) xelk["nitroVersion"] = annotation.nitroVersion;
+  if (annotation.coldPhase !== undefined) {
+    xelk["acceptanceCacheState"] = annotation.coldPhase.cacheState;
+    xelk["coldOptimizeDeps"] = summarizeColdPhase(annotation.coldPhase.events);
+  }
+  if (annotation.hmrUpdate !== undefined) xelk["hmrUpdate"] = annotation.hmrUpdate;
+  if (annotation.buildOutputs !== undefined) {
+    xelk["buildOutputs"] = [...annotation.buildOutputs];
+  }
+  result["extensions"] = { "x-elk": xelk };
+
+  const check = createContractValidators().validateResultAgainstManifest(manifest, result);
+  if (!check.valid) {
+    throw new Error(
+      `annotated ELK result failed the contract: ${JSON.stringify(check.violations)}`,
+    );
+  }
+  writeFileSync(report.resultPath, `${JSON.stringify(result, null, 2)}\n`);
+}
+
+function assertBuildOutputs(projectRoot: string): string[] {
+  const missing = BUILD_OUTPUTS.filter((relative) => !existsSync(join(projectRoot, relative)));
+  if (missing.length > 0) {
+    throw new Error(`ELK build did not produce ${missing.join(", ")}`);
+  }
+  return [...BUILD_OUTPUTS];
 }
 
 function corepackHome(): string {
@@ -310,13 +469,17 @@ function runEnvironmentForLifecycle(
       ...(rsviteCommand ? { rsviteCommand } : {}),
     });
     const browser = lifecycle === "build" ? undefined : createElkBrowserAdapter();
-    return runCompatibilityCheck({
+    const viteVersion = readInstalledVersion(projectRoot, "vite");
+    const report = await runCompatibilityCheck({
       manifest,
       entryId: ELK_ENTRY_ID,
       lifecycle,
       subject: {
         name: subject,
-        version: subject === "vite" ? "nuxt-dev" : "workspace-unavailable",
+        version:
+          subject === "vite"
+            ? (viteVersion ?? readInstalledVersion(projectRoot, "vite") ?? "unknown")
+            : "workspace-unavailable",
       },
       environment,
       projectRoot,
@@ -336,12 +499,40 @@ function runEnvironmentForLifecycle(
         browserMs: BROWSER_TIMEOUT_MS,
       },
     });
+    await restoreElkStylesheet(projectRoot);
+    const measuredVite = readInstalledVersion(projectRoot, "vite") ?? viteVersion;
+    annotateElkResult(report, manifest, {
+      ...(measuredVite !== undefined ? { viteVersion: measuredVite } : {}),
+      ...(readInstalledVersion(projectRoot, "nuxt") !== undefined
+        ? { nuxtVersion: readInstalledVersion(projectRoot, "nuxt") }
+        : {}),
+      ...(readInstalledVersion(projectRoot, "nitropack") !== undefined
+        ? { nitroVersion: readInstalledVersion(projectRoot, "nitropack") }
+        : {}),
+      ...(browser !== undefined ? { coldPhase: browser.takeColdPhase() } : {}),
+      ...(lifecycle === "dev" && subject === "vite"
+        ? {
+            hmrUpdate: {
+              path: ELK_HMR_STYLESHEET,
+              kind: "content-replace",
+              find: ELK_HMR_FIND,
+              replace: ELK_HMR_REPLACE,
+              reverted: true,
+            },
+          }
+        : {}),
+      ...(lifecycle === "build" && subject === "vite" && report.failure === undefined
+        ? { buildOutputs: assertBuildOutputs(projectRoot) }
+        : {}),
+    });
+    return report;
   };
 }
 
 export async function runElkViteBaseline(options: ElkRunOptions): Promise<ElkViteBaseline> {
   const checkout = await checkoutElk(options.checkoutParent, options.existingCheckout);
   try {
+    await wipeViteOptimizerCache(checkout.path);
     const dev = await runEnvironmentForLifecycle(
       options.environment,
       checkout.path,

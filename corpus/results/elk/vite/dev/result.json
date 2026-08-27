@@ -6,7 +6,7 @@
   },
   "subject": {
     "name": "vite",
-    "version": "nuxt-dev"
+    "version": "7.3.5"
   },
   "environment": {
     "os": "linux",
@@ -31,15 +31,15 @@
       "--host",
       "127.0.0.1",
       "--port",
-      "43477",
+      "38733",
       "--dotenv",
       ".env.mock"
     ],
-    "cwd": "/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7",
+    "cwd": "/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7-rerecord",
     "exitCode": null
   },
-  "startedAt": "2026-08-27T14:18:14.827Z",
-  "finishedAt": "2026-08-27T14:18:40.236Z",
+  "startedAt": "2026-08-27T15:41:36.842Z",
+  "finishedAt": "2026-08-27T15:42:09.811Z",
   "outcome": "pass",
   "javascriptApiLevel": "C3",
   "capabilityOwners": [
@@ -78,5 +78,62 @@
   ],
   "explicitFallbacks": [],
   "browserErrors": [],
-  "artifactPaths": ["install.stdout.log", "install.stderr.log", "dev.stdout.log", "dev.stderr.log"]
+  "artifactPaths": ["install.stdout.log", "install.stderr.log", "dev.stdout.log", "dev.stderr.log"],
+  "extensions": {
+    "x-elk": {
+      "ignoredPageError": "NotSupportedError: Model not available",
+      "viteVersion": "7.3.5",
+      "nuxtVersion": "4.4.7",
+      "nitroVersion": "2.13.4",
+      "acceptanceCacheState": "warm",
+      "coldOptimizeDeps": {
+        "phase": "cold-optimize-deps",
+        "eventCount": 13,
+        "mainFrameNavigations": 6,
+        "errors": [
+          {
+            "type": "console-error",
+            "message": "Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep)",
+            "url": "http://127.0.0.1:38733/_nuxt/@fs/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7-rerecord/node_modules/.cache/vite/client/deps/tiny-decode.js?v=8c339d73"
+          },
+          {
+            "type": "request-failed",
+            "url": "http://127.0.0.1:38733/_nuxt/@fs/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7-rerecord/node_modules/.cache/vite/client/deps/tiny-decode.js?v=8c339d73",
+            "message": "net::ERR_ABORTED"
+          },
+          {
+            "type": "page-error",
+            "message": "TypeError: Failed to fetch dynamically imported module: http://127.0.0.1:38733/_nuxt/@fs/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7-rerecord/node_modules/.pnpm/nuxt@4.4.7_@babel+plugin-syntax-jsx@7.29.7_@babel+core@7.29.0__@babel+plugin-syntax-typ_e65ea5674bab43264150363baa09017d/node_modules/nuxt/dist/app/entry.js?v=e1b466e7"
+          },
+          {
+            "type": "console-error",
+            "message": "Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep)",
+            "url": "http://127.0.0.1:38733/_nuxt/@fs/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7-rerecord/node_modules/.cache/vite/client/deps/ultrahtml.js?v=8b8c5755"
+          },
+          {
+            "type": "request-failed",
+            "url": "http://127.0.0.1:38733/_nuxt/@fs/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7-rerecord/node_modules/.cache/vite/client/deps/ultrahtml.js?v=8b8c5755",
+            "message": "net::ERR_ABORTED"
+          },
+          {
+            "type": "console-error",
+            "message": "Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep)",
+            "url": "http://127.0.0.1:38733/_nuxt/@fs/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7-rerecord/node_modules/.cache/vite/client/deps/fuse__js.js?v=dfee7297"
+          },
+          {
+            "type": "request-failed",
+            "url": "http://127.0.0.1:38733/_nuxt/@fs/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7-rerecord/node_modules/.cache/vite/client/deps/fuse__js.js?v=dfee7297",
+            "message": "net::ERR_ABORTED"
+          }
+        ]
+      },
+      "hmrUpdate": {
+        "path": "app/styles/global.css",
+        "kind": "content-replace",
+        "find": "  font-size: var(--font-size, 15px);",
+        "replace": "  font-size: var(--font-size, 15px); /* rsvite-elk-hmr */",
+        "reverted": true
+      }
+    }
+  }
 }

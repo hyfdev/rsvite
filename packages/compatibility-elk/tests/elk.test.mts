@@ -97,12 +97,16 @@ test("a cloned run manifest still validates after binding a free port", () => {
   const check = createContractValidators().validateCorpusManifest(manifest);
   assert.equal(check.valid, true, check.valid ? "" : JSON.stringify(check.violations));
   const entry = elkEntryFromManifest(manifest);
-  const argv = asRecord(asRecord(entry["commands"])["dev"])["argv"];
+  const dev = asRecord(asRecord(entry["commands"])["dev"]);
+  const argv = dev["argv"];
   assert.ok(Array.isArray(argv));
   assert.equal(argv[0], "pnpm");
   assert.ok(argv.includes("nuxt"));
   assert.ok(argv.includes(".env.mock"));
   assert.ok(argv.includes("5314"));
+  const env = asRecord(dev["env"]);
+  assert.equal(env["CONTEXT"], "dev");
+  assert.equal(env["NUXT_STORAGE_DRIVER"], "fs");
 });
 
 test("rsvite records the ELK gap as C0 Rust ownership without a Vite fallback", () => {
@@ -192,6 +196,15 @@ test("the committed ELK raw results preserve the Vite baseline and first rsvite 
     asRecord(rsvite["failureClassification"])["kind"],
     "current-compatibility-requirement",
   );
+
+  const viteDev = readResult(elkEvidenceResultPaths.vite.dev);
+  assert.equal(asRecord(viteDev["subject"])["version"], "7.3.5");
+  const xelk = asRecord(asRecord(viteDev["extensions"])["x-elk"]);
+  assert.equal(xelk["acceptanceCacheState"], "warm");
+  assert.equal(asRecord(xelk["coldOptimizeDeps"])["phase"], "cold-optimize-deps");
+  assert.equal(asRecord(xelk["hmrUpdate"])["kind"], "content-replace");
+  assert.equal(asRecord(xelk["hmrUpdate"])["path"], "app/styles/global.css");
+  assert.equal(xelk["ignoredPageError"], "NotSupportedError: Model not available");
 });
 
 test("the record task forwards ELK_CHECKOUT and RUNNER_IMAGE through Vite+", () => {

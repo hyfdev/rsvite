@@ -198,9 +198,8 @@
         }
       },
       "readiness": {
-        "type": "http-ready",
-        "urlPath": "/home",
-        "expectStatus": 200,
+        "type": "stdout-pattern",
+        "pattern": "Local:",
         "timeoutMs": 180000
       },
       "browserAcceptance": {
@@ -211,8 +210,8 @@
           "sentinelStorage": "in-memory",
           "edit": {
             "path": "app/styles/global.css",
-            "find": "html",
-            "replace": "html"
+            "find": "  font-size: var(--font-size, 15px);",
+            "replace": "  font-size: var(--font-size, 15px); /* rsvite-elk-hmr */"
           },
           "expectedText": "elkdev"
         }

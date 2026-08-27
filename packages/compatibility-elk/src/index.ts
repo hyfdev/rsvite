@@ -1,16 +1,20 @@
 export {
   assertElkSourceUnchanged,
   checkoutElk,
+  createElkBrowserAdapter,
   createElkEnvironment,
   ensureElkPnpmOnPath,
   runElkEvidence,
   runElkRsviteIncompatibility,
   runElkViteBaseline,
+  type ElkBrowserAdapter,
+  type ElkBrowserAdapterOptions,
   type ElkCheckout,
   type ElkEvidence,
   type ElkRunOptions,
   type ElkViteBaseline,
 } from "./elk.ts";
+export { summarizeColdPhase, waitForObservedStability } from "./stability.ts";
 export {
   createElkManifest,
   declaredElkRun,
@@ -22,6 +26,8 @@ export {
   ELK_COMMIT,
   ELK_ENTRY_ID,
   ELK_HOME_PATH,
+  ELK_HMR_FIND,
+  ELK_HMR_REPLACE,
   ELK_HMR_STYLESHEET,
   ELK_LICENSE_PATH,
   ELK_LOCKFILE,

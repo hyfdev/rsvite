@@ -132,7 +132,7 @@ export function createChromiumBrowserAdapter(): BrowserAdapter & {
         });
         const adapted = new ChromiumPage(browser, page);
         await abortable(
-          page.goto(url, { timeout: timeoutMs, waitUntil: "load" }),
+          page.goto(url, { timeout: timeoutMs, waitUntil: "domcontentloaded" }),
           signal,
           async () => {
             await adapted.closeUnchecked();

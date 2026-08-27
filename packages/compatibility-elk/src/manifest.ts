@@ -12,6 +12,8 @@ export const ELK_PNPM_VERSION = "11.6.0";
 export const ELK_HOME_PATH = "/home";
 export const ELK_SENTINEL = "globalThis.__rsviteElkHmrSentinel";
 export const ELK_HMR_STYLESHEET = "app/styles/global.css";
+export const ELK_HMR_FIND = "  font-size: var(--font-size, 15px);";
+export const ELK_HMR_REPLACE = "  font-size: var(--font-size, 15px); /* rsvite-elk-hmr */";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = join(srcDir, "..");
@@ -86,7 +88,7 @@ function commandFor(
   port: number,
   rsviteCommand: readonly string[] | undefined,
 ): { argv: string[]; env?: Record<string, string> } {
-  const mocked = { CONTEXT: "dev" };
+  const mocked = { CONTEXT: "dev", NUXT_STORAGE_DRIVER: "fs" };
   if (subject === "vite") {
     switch (lifecycle) {
       case "dev":
@@ -135,12 +137,10 @@ function commandFor(
 
 function readinessFor(lifecycle: LifecycleName): Record<string, unknown> {
   if (lifecycle === "build") return { type: "process-exit", timeoutMs: 900_000 };
-  return {
-    type: "http-ready",
-    urlPath: lifecycle === "preview" ? "/" : ELK_HOME_PATH,
-    expectStatus: 200,
-    timeoutMs: 180_000,
-  };
+  if (lifecycle === "preview") {
+    return { type: "http-ready", urlPath: "/", expectStatus: 200, timeoutMs: 180_000 };
+  }
+  return { type: "stdout-pattern", pattern: "Local:", timeoutMs: 180_000 };
 }
 
 function browserAcceptanceFor(lifecycle: LifecycleName): Record<string, unknown> {
@@ -152,8 +152,8 @@ function browserAcceptanceFor(lifecycle: LifecycleName): Record<string, unknown>
       sentinelStorage: "in-memory",
       edit: {
         path: ELK_HMR_STYLESHEET,
-        find: "unused-elk-hmr-marker",
-        replace: "unused-elk-hmr-marker",
+        find: ELK_HMR_FIND,
+        replace: ELK_HMR_REPLACE,
       },
       expectedText: "elkdev",
     },
