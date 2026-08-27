@@ -53,7 +53,7 @@ function isLocalUrl(url: string): boolean {
   return url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost");
 }
 
-class ChromiumPage implements BrowserPage {
+export class ChromiumPage implements BrowserPage {
   readonly #browser: Browser;
   readonly #events: BrowserEvent[] = [];
   readonly #page: Page;

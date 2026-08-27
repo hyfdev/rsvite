@@ -39,6 +39,7 @@ export {
   type ElkSubject,
 } from "./manifest.ts";
 export {
+  ChromiumPage,
   chromiumVersion,
   createChromiumBrowserAdapter,
   discardMainFrameNavigations,
