@@ -28,3 +28,7 @@ must be the pinned commit with no staged, unstaged, or untracked changes before 
 The recorder reads `process.platform` and `process.arch`. It puts the lockfile pnpm (`10.34.5`)
 first on PATH and checks `--version` in the Vite checkout, which is the command cwd. A host other
 than Linux x64, or a pnpm other than `10.34.5`, is rejected before the run.
+
+Playground `test-serve` loads `packages/vite/dist/node/index.js`, which is gitignored and is not
+produced by install. The recorder runs the lockfile install, deletes `packages/vite/dist`, then
+`pnpm --filter vite build`, so a brand-new worktree of the pin repeats without a leftover bundle.

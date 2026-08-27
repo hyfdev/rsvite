@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createContractValidators } from "@rsvite/compatibility-contract";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "vite-plus/test";
 import {
   HTML_PRESERVE_COMMENTS_ENTRY_ID,
@@ -16,11 +24,14 @@ import {
   assertPinnedCleanViteCheckout,
   assertPnpmVersion,
   assertResultArtifactsExist,
+  assertViteNodeBundle,
   corepackCachedPnpmCjs,
   ensureManifestPnpmOnPath,
   htmlPreserveCommentsAdapter,
   htmlPreserveCommentsCommandExecutable,
   htmlPreserveCommentsPackageManager,
+  VITE_NODE_BUNDLE,
+  wipeViteDist,
   readCorpusManifest,
   readProvenance,
   validateCorpusManifestDocument,
@@ -330,4 +341,44 @@ test("the lockfile pnpm can be spawned while the parent session is another pnpm"
   } finally {
     process.env["PATH"] = previousPath;
   }
+});
+
+test("skipping the vite build fails because the playground cannot load the node bundle", () => {
+  const dir = mkdtempSync(join("/tmp", "rsvite-vite-bundle-"));
+  const bundle = join(dir, ...VITE_NODE_BUNDLE.split("/"));
+  try {
+    assert.throws(() => assertViteNodeBundle(dir), /packages\/vite\/dist\/node\/index\.js/);
+
+    const probe = spawnSync(
+      process.execPath,
+      ["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(bundle).href)})`],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(probe.status, 0);
+    const output = `${probe.stdout}\n${probe.stderr}`;
+    assert.match(output, /ERR_MODULE_NOT_FOUND/);
+    assert.match(output, /index\.js/);
+
+    mkdirSync(dirname(bundle), { recursive: true });
+    writeFileSync(bundle, "export {}\n");
+    assertViteNodeBundle(dir);
+    wipeViteDist(dir);
+    assert.throws(() => assertViteNodeBundle(dir), /packages\/vite\/dist\/node\/index\.js/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the recorder wipes Vite dist and builds the package before test-serve", () => {
+  const script = readFileSync(join(testsDir, "../scripts/record-vite-baseline.mts"), "utf8");
+  const prepareAt = script.indexOf("preparePinnedViteCheckout(checkout)");
+  const runAt = script.indexOf("await runCompatibilityCheck");
+  assert.ok(prepareAt >= 0, "the recorder must prepare the pinned checkout");
+  assert.ok(runAt > prepareAt, "the vite build must run before the compatibility check");
+
+  const src = readFileSync(join(testsDir, "../src/index.ts"), "utf8");
+  const fn = src.slice(src.indexOf("export function preparePinnedViteCheckout"));
+  const wipeAt = fn.indexOf("wipeViteDist");
+  const buildAt = fn.indexOf('["--filter", "vite", "build"]');
+  assert.ok(wipeAt >= 0 && buildAt > wipeAt, "stale dist must be discarded before the vite build");
 });

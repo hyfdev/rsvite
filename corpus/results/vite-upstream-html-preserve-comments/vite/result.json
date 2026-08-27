@@ -27,11 +27,11 @@
       "--testNamePattern",
       "main preserve comments"
     ],
-    "cwd": "/root/Documents/github-opensource/vite",
+    "cwd": "/root/Documents/github-opensource/.worktrees/vite-ee644014-issue-4-fresh",
     "exitCode": 0
   },
-  "startedAt": "2026-08-27T13:31:01.591Z",
-  "finishedAt": "2026-08-27T13:31:03.864Z",
+  "startedAt": "2026-08-27T13:49:55.536Z",
+  "finishedAt": "2026-08-27T13:49:57.851Z",
   "outcome": "pass",
   "javascriptApiLevel": "C0",
   "capabilityOwners": [

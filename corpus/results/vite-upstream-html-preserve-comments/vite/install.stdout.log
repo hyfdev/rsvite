@@ -6,7 +6,6 @@ Packages: [32m+109[39m
 Progress: resolved [96m109[39m, reused [96m109[39m, downloaded [96m0[39m, added [96m109[39m, done
 
 [36m.[39m [96mpostinstall[39m$ simple-git-hooks
-[36m.[39m [96mpostinstall[39m: [INFO] Successfully set the pre-commit with command: pnpm exec lint-staged --concurrent false
-[36m.[39m [96mpostinstall[39m: [INFO] Successfully set all git hooks
+[36m.[39m [96mpostinstall[39m: [ERROR], Was not able to set git hooks. Error: Error: ENOTDIR: not a directory, mkdir '/root/Documents/github-opensource/.worktrees/vite-ee644014-issue-4-fresh/.git/hooks'
 [36m.[39m [96mpostinstall[39m: Done
 Done in 1s using pnpm v10.34.5

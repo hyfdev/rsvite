@@ -13,6 +13,7 @@ import {
   htmlPreserveCommentsAdapter,
   htmlPreserveCommentsCommandExecutable,
   htmlPreserveCommentsPackageManager,
+  preparePinnedViteCheckout,
   readCorpusManifest,
   viteBaselineDir,
 } from "../src/index.ts";
@@ -36,6 +37,7 @@ if (testExecutable !== packageManager.name) {
 assertPinnedCleanViteCheckout(checkout);
 ensureManifestPnpmOnPath(packageManager.version);
 const pnpmVersion = assertPnpmVersion(testExecutable, packageManager.version, { cwd: checkout });
+preparePinnedViteCheckout(checkout);
 
 const packageJson = JSON.parse(
   readFileSync(join(checkout, "packages/vite/package.json"), "utf8"),

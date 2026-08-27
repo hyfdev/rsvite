@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -266,17 +267,61 @@ export function htmlPreserveCommentsPackageManager(manifest: unknown = readCorpu
   };
 }
 
+export function htmlPreserveCommentsCommandArgv(
+  commandName: "install" | "test",
+  manifest: unknown = readCorpusManifest(),
+): string[] {
+  const raw = asRecord(asRecord(htmlPreserveCommentsEntry(manifest)["commands"])?.[commandName])?.[
+    "argv"
+  ];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error(`commands.${commandName}.argv is missing`);
+  }
+  return raw.map((part, index) => {
+    if (typeof part !== "string" || part.length === 0) {
+      throw new Error(`commands.${commandName}.argv[${String(index)}] is missing`);
+    }
+    return part;
+  });
+}
+
 export function htmlPreserveCommentsCommandExecutable(
   commandName: "install" | "test",
   manifest: unknown = readCorpusManifest(),
 ): string {
-  const argv = asRecord(asRecord(htmlPreserveCommentsEntry(manifest)["commands"])?.[commandName])?.[
-    "argv"
-  ];
-  if (!Array.isArray(argv) || typeof argv[0] !== "string" || argv[0].length === 0) {
-    throw new Error(`commands.${commandName}.argv[0] is missing`);
+  return htmlPreserveCommentsCommandArgv(commandName, manifest)[0]!;
+}
+
+export const VITE_NODE_BUNDLE = "packages/vite/dist/node/index.js";
+
+export function viteNodeBundlePath(checkout: string): string {
+  return join(checkout, ...VITE_NODE_BUNDLE.split("/"));
+}
+
+export function wipeViteDist(checkout: string): void {
+  rmSync(join(checkout, "packages/vite/dist"), { recursive: true, force: true });
+}
+
+export function assertViteNodeBundle(checkout: string): void {
+  const bundle = viteNodeBundlePath(checkout);
+  let stat;
+  try {
+    stat = statSync(bundle);
+  } catch {
+    throw new Error(`Vite node bundle is missing: ${VITE_NODE_BUNDLE}`);
   }
-  return argv[0];
+  if (!stat.isFile()) {
+    throw new Error(`Vite node bundle is not a file: ${VITE_NODE_BUNDLE}`);
+  }
+}
+
+/** Install deps, discard any existing dist, then build `packages/vite` so test-serve can load it. */
+export function preparePinnedViteCheckout(checkout: string): void {
+  const install = htmlPreserveCommentsCommandArgv("install");
+  execFileSync(install[0]!, install.slice(1), { cwd: checkout, encoding: "utf8" });
+  wipeViteDist(checkout);
+  execFileSync("pnpm", ["--filter", "vite", "build"], { cwd: checkout, encoding: "utf8" });
+  assertViteNodeBundle(checkout);
 }
 
 /** The adopted Vite baseline is Linux x64. Other hosts must not be labeled as that environment. */
