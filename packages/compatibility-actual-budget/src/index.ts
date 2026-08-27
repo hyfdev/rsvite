@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CommandSpec } from "@rsvite/compatibility-runner";
+import { SENTINEL_EXPRESSION } from "./browser.ts";
 
 /** The pinned identity of the validated project, kept out of code so a change is reviewable. */
 export interface Pin {
@@ -15,7 +16,13 @@ export interface Pin {
   };
   readonly entryId: string;
   readonly e2eSpec: string;
+  readonly devPort: number;
   readonly sentinelEditPath: string;
+  readonly sentinelEdit: {
+    readonly find: string;
+    readonly replace: string;
+    readonly expectedText: string;
+  };
 }
 
 const pinPath = fileURLToPath(new URL("../pin.json", import.meta.url));
@@ -83,13 +90,51 @@ export function assertPinnedCheckout(root: string, pin: Pin = readPin()): void {
  * The project's own lifecycle commands, unchanged. `install` is immutable so a run can never
  * quietly resolve a different dependency graph than the lockfile records.
  */
-export function actualBudgetCommands(port: number): Record<string, CommandSpec> {
-  const env = { PORT: String(port), BROWSER: "none" };
+export function actualBudgetCommands(pin: Pin = readPin()): Record<string, CommandSpec> {
+  const env = { BROWSER: "none", PORT: String(pin.devPort) };
   return {
     install: { argv: ["corepack", "yarn", "install", "--immutable"] },
-    dev: { argv: ["corepack", "yarn", "start:browser-frontend"], env },
+    // The project's own development entry, the same one its Playwright configuration starts.
+    dev: { argv: ["corepack", "yarn", "start"], env },
     build: { argv: ["corepack", "yarn", "build:browser"] },
     preview: { argv: ["node", "packages/desktop-client/bin/serve-build.mjs"], env },
+  };
+}
+
+/** The corpus entry, generated from the pin so the manifest cannot drift away from it. */
+export function actualBudgetEntry(pin: Pin = readPin()): Record<string, unknown> {
+  return {
+    id: pin.entryId,
+    kind: "real-project",
+    source: { repository: pin.repository, commit: pin.commit, license: pin.license },
+    lockfile: pin.lockfile,
+    commands: actualBudgetCommands(pin),
+    readiness: { type: "http-ready", urlPath: "/", expectStatus: 200, timeoutMs: 300000 },
+    browserAcceptance: {
+      entryPath: "/",
+      mainFrameNavigationIsFailure: true,
+      hmr: {
+        sentinelExpression: SENTINEL_EXPRESSION,
+        sentinelStorage: "in-memory",
+        edit: {
+          path: pin.sentinelEditPath,
+          find: pin.sentinelEdit.find,
+          replace: pin.sentinelEdit.replace,
+        },
+        expectedText: pin.sentinelEdit.expectedText,
+      },
+    },
+    expectedCapabilities: [
+      "html",
+      "modules-and-assets",
+      "resolution",
+      "file-watching",
+      "hmr-without-full-reload",
+      "build-output",
+    ],
+    javascriptApiLevel: "C1",
+    notes:
+      "Complex React monorepo gate. The adapter drives the project's own onboarding E2E spec and build without modifying its source or expectations.",
   };
 }
 
@@ -98,6 +143,10 @@ export function actualBudgetCommands(port: number): Record<string, CommandSpec> 
  * is set. That is the seam this adapter uses: the runner owns the server and its readiness, and
  * the project's spec files stay exactly as upstream wrote them.
  */
+export function devOrigin(pin: Pin = readPin()): string {
+  return `http://localhost:${String(pin.devPort)}`;
+}
+
 export function upstreamE2eCommand(origin: string, pin: Pin = readPin()): CommandSpec {
   return {
     argv: [

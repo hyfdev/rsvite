@@ -1,0 +1,28 @@
+[36mvite v8.1.5 [32mbuilding client environment for production...[36m[39m
+[36m
+watching for file changes...[39m
+[36m
+build started...[39m
+[2Ktransforming...✓ 54 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/plugin-sw.js  94.73 kB │ gzip: 23.51 kB │ map: 173.44 kB
+
+[36mbuilt in 26ms.[39m
+
+  [32m[1mVITE[22m v8.1.5[39m  [42m [1mbrowser[22m [49m  [2mready in [0m[1m160[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3001[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://100.64.0.13:[1m3001[22m/[39m
+[36mvite v8.1.5 [32mbuilding client environment for development...[36m[39m
+[36m
+watching for file changes...[39m
+[36m
+build started...[39m
+[2Ktransforming...✓ 2078 modules transformed.
+rendering chunks...
+computing gzip size...
+lib-dist/browser/kcab.worker.dev.js  5,240.22 kB │ gzip: 984.32 kB │ map: 10,117.69 kB
+
+[36mbuilt in 596ms.[39m
+[2m10:13:58 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/manager/WelcomeScreen.tsx[22m

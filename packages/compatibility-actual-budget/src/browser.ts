@@ -33,6 +33,7 @@ interface PlaywrightPage {
   goto(url: string, options: { waitUntil: string; timeout: number }): Promise<unknown>;
   evaluate(expression: string): Promise<unknown>;
   mainFrame(): unknown;
+  url(): string;
 }
 
 /**
@@ -56,6 +57,26 @@ function abortable<T>(work: Promise<T>, signal: AbortSignal, what: string): Prom
     signal.addEventListener("abort", onAbort, { once: true });
     work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
   });
+}
+
+const SETTLE_QUIET_MS = 1_500;
+const SETTLE_TIMEOUT_MS = 30_000;
+
+/** Resolves once the address has stopped changing, so startup routing is not read as an update. */
+async function settle(page: PlaywrightPage): Promise<void> {
+  const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+  let seen = page.url();
+  let quietSince = Date.now();
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const now = page.url();
+    if (now !== seen) {
+      seen = now;
+      quietSince = Date.now();
+      continue;
+    }
+    if (Date.now() - quietSince >= SETTLE_QUIET_MS) return;
+  }
 }
 
 export function createPlaywrightBrowser(checkoutRoot: string): BrowserAdapter {
@@ -106,7 +127,11 @@ export function createPlaywrightBrowser(checkoutRoot: string): BrowserAdapter {
         request.signal,
         "opening the page",
       );
-      // The load that brought the page up is not an update, so it is not evidence of a reload.
+      // An application decides where it belongs after it loads. Actual Budget redirects a fresh
+      // visitor to its setup route, and that redirect is part of arriving, not evidence about an
+      // update that has not happened yet. Waiting for the address to stop moving is what
+      // separates the two; without it the app's own routing is read as a full reload.
+      await abortable(settle(page), request.signal, "waiting for the page to settle");
       pending.length = 0;
 
       const adapted: BrowserPage = {

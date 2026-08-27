@@ -82,7 +82,7 @@ test("a checkout missing the license, lockfile or upstream spec is rejected", as
 });
 
 test("the install command refuses to resolve anything the lockfile does not record", () => {
-  const commands = actualBudgetCommands(3001);
+  const commands = actualBudgetCommands();
 
   assert.deepEqual(commands["install"]?.argv, ["corepack", "yarn", "install", "--immutable"]);
 });

@@ -1,0 +1,26 @@
+➤ YN0000: · Yarn 4.17.1
+➤ YN0000: ┌ Resolution step
+➤ YN0000: └ Completed in 0s 238ms
+➤ YN0000: ┌ Post-resolution validation
+➤ YN0060: │ react is listed by your project with version 19.2.7 (pfeaecd), which doesn't satisfy what @react-spring/zdog (via react-spring) and other dependencies request (but they have non-overlapping ranges!).
+➤ YN0060: │ react-dom is listed by your project with version 19.2.7 (p145d5f), which doesn't satisfy what @react-spring/zdog (via react-spring) and other dependencies request (but they have non-overlapping ranges!).
+➤ YN0002: │ @actual-app/components@workspace:packages/component-library [dc3cf] doesn't provide @babel/core (p50edc6), requested by @rolldown/plugin-babel and other dependencies.
+➤ YN0002: │ @actual-app/components@workspace:packages/component-library [dc3cf] doesn't provide @testing-library/dom (pf4b1d9), requested by @testing-library/react.
+➤ YN0002: │ @actual-app/components@workspace:packages/component-library [dc3cf] doesn't provide eslint (p315b77), requested by eslint-plugin-storybook.
+➤ YN0002: │ @actual-app/components@workspace:packages/component-library [dc3cf] doesn't provide rolldown (p0388dc), requested by @rolldown/plugin-babel.
+➤ YN0002: │ @actual-app/components@workspace:packages/component-library [dc3cf] doesn't provide typescript (p0be690), requested by @storybook/react-vite.
+➤ YN0002: │ @actual-app/components@workspace:packages/component-library doesn't provide @babel/core (p41f118), requested by @rolldown/plugin-babel and other dependencies.
+➤ YN0002: │ @actual-app/components@workspace:packages/component-library doesn't provide @testing-library/dom (pfa5575), requested by @testing-library/react.
+➤ YN0002: │ @actual-app/components@workspace:packages/component-library doesn't provide eslint (p306d4d), requested by eslint-plugin-storybook.
+➤ YN0002: │ @actual-app/components@workspace:packages/component-library doesn't provide rolldown (pb86c65), requested by @rolldown/plugin-babel.
+➤ YN0002: │ @actual-app/components@workspace:packages/component-library doesn't provide typescript (p9a9955), requested by @storybook/react-vite.
+➤ YN0002: │ @actual-app/web@workspace:packages/desktop-client doesn't provide react-is (p874ff5), requested by recharts.
+➤ YN0002: │ eslint-plugin-actual@workspace:packages/eslint-plugin-actual doesn't provide eslint (pc54032), requested by eslint-vitest-rule-tester.
+➤ YN0086: │ Some peer dependencies are incorrectly met by your project; run yarn explain peer-requirements <hash> for details, where <hash> is the six-letter p-prefixed code.
+➤ YN0086: │ Some peer dependencies are incorrectly met by dependencies; run yarn explain peer-requirements for details.
+➤ YN0000: └ Completed
+➤ YN0000: ┌ Fetch step
+➤ YN0000: └ Completed in 0s 473ms
+➤ YN0000: ┌ Link step
+➤ YN0000: └ Completed in 2s 539ms
+➤ YN0000: · Done with warnings in 3s 362ms

@@ -1,0 +1,59 @@
+{
+  "contractVersion": 1,
+  "manifestEntry": {
+    "id": "actual-budget",
+    "sourceCommit": "766cc8a7244c35f575ecc33a7a718b060cb5d496"
+  },
+  "subject": {
+    "name": "vite",
+    "version": "8.1.5"
+  },
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "runnerImage": "local",
+    "nodeVersion": "24.20.0",
+    "packageManager": {
+      "name": "yarn",
+      "version": "4.17.1"
+    },
+    "browser": {
+      "name": "chromium",
+      "version": "1.61.1"
+    }
+  },
+  "command": {
+    "argv": ["corepack", "yarn", "start"],
+    "cwd": "/root/.slock/agents/51a222ec-bcd0-4f4b-b39e-0d43c4c72273/work/corpus/actual",
+    "exitCode": null
+  },
+  "startedAt": "2026-08-27T14:13:12.729Z",
+  "finishedAt": "2026-08-27T14:13:58.838Z",
+  "outcome": "pass",
+  "javascriptApiLevel": "C1",
+  "capabilityOwners": [
+    {
+      "capability": "html",
+      "owner": "vite"
+    },
+    {
+      "capability": "modules-and-assets",
+      "owner": "vite"
+    },
+    {
+      "capability": "resolution",
+      "owner": "vite"
+    },
+    {
+      "capability": "file-watching",
+      "owner": "vite"
+    },
+    {
+      "capability": "hmr-without-full-reload",
+      "owner": "vite"
+    }
+  ],
+  "explicitFallbacks": [],
+  "browserErrors": [],
+  "artifactPaths": ["install.stdout.log", "install.stderr.log", "dev.stdout.log", "dev.stderr.log"]
+}
