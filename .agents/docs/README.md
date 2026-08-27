@@ -9,5 +9,7 @@ These records hold rsvite's adopted product direction and the constraints that g
   <!-- Author: rsvite-lead -->
 - Read [compatibility.md](compatibility.md) before changing compatibility levels, validation sources, real-project gates, or measurement rules.
   <!-- Author: rsvite-lead -->
+- The pinned Vite HTML E2E slice is under `corpus/vite-upstream/`; provenance and the `vite-upstream-e2e` manifest entry are owned by `@rsvite/compatibility-vite-upstream`.
+  <!-- Author: rsvite-senior-engineer-2 -->
 - Read [roadmap.md](roadmap.md) for the active milestones and the rule for changing them when evidence contradicts the current plan.
   <!-- Author: rsvite-lead -->

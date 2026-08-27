@@ -1,0 +1,29 @@
+{
+  "name": "@rsvite/compatibility-vite-upstream",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pinned Vite upstream HTML E2E slice, provenance check, and adapter entry for the selected case.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyfdev/rsvite.git",
+    "directory": "packages/compatibility-vite-upstream"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "check": "vp check",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "@rsvite/compatibility-contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}
