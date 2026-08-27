@@ -55,28 +55,41 @@ process.once("exit", () => {
   for (const pgid of liveGroups) signalGroup(pgid, "SIGKILL");
 });
 
-/** Signals this runner sent to a group, so an exit can be attributed to us or to something else. */
-const sentSignals = new Map<number, Set<NodeJS.Signals>>();
+type Delivery = "delivered" | "gone" | "denied";
 
-function signalGroup(pgid: number, signal: NodeJS.Signals | 0): boolean {
-  if (signal !== 0) {
-    const sent = sentSignals.get(pgid) ?? new Set<NodeJS.Signals>();
-    sent.add(signal);
-    sentSignals.set(pgid, sent);
-  }
+/**
+ * What this runner actually managed to send, and when it first managed it. Recording a signal
+ * before the send would count an attempt that failed, and an attempt that failed delivered
+ * nothing — so it cannot explain how a process ended.
+ */
+interface GroupSignals {
+  readonly sent: Set<NodeJS.Signals>;
+  firstDeliveredAt?: number;
+}
+
+const groupSignals = new Map<number, GroupSignals>();
+
+function signalGroup(pgid: number, signal: NodeJS.Signals | 0): Delivery {
   try {
     process.kill(-pgid, signal);
-    return true;
   } catch (error) {
     // ESRCH means the group is gone, which is the state the caller wanted. EPERM means
     // something in it still exists but is not ours to signal, so the group is not gone.
-    return (error as NodeJS.ErrnoException).code === "EPERM";
+    return (error as NodeJS.ErrnoException).code === "EPERM" ? "denied" : "gone";
   }
+
+  if (signal !== 0) {
+    const record = groupSignals.get(pgid) ?? { sent: new Set<NodeJS.Signals>() };
+    record.sent.add(signal);
+    record.firstDeliveredAt ??= Date.now();
+    groupSignals.set(pgid, record);
+  }
+  return "delivered";
 }
 
 /** True while any process still belongs to the group. */
 function groupExists(pgid: number): boolean {
-  return signalGroup(pgid, 0);
+  return signalGroup(pgid, 0) !== "gone";
 }
 
 async function waitForGroupToDisappear(pgid: number, timeoutMs: number): Promise<boolean> {
@@ -110,23 +123,25 @@ function spawnGroup(command: CommandSpec): ChildProcess {
  * against the leader closing: a descendant that ignores `SIGTERM`, or one that outlives a
  * leader which exited on its own, must still be gone when this resolves.
  */
-async function terminateGroup(pgid: number): Promise<void> {
-  if (!groupExists(pgid)) {
+async function terminateGroup(pgid: number): Promise<{ alreadyGone: boolean }> {
+  // The first send is also the question "were you still there?", asked at the only moment that
+  // matters. A group that is already gone was ended by something other than this runner.
+  const first = signalGroup(pgid, "SIGTERM");
+  if (first === "gone") {
     liveGroups.delete(pgid);
-    return;
+    return { alreadyGone: true };
   }
 
-  signalGroup(pgid, "SIGTERM");
   if (await waitForGroupToDisappear(pgid, TERMINATION_GRACE_MS)) {
     liveGroups.delete(pgid);
-    return;
+    return { alreadyGone: false };
   }
 
   signalGroup(pgid, "SIGKILL");
   const gone = await waitForGroupToDisappear(pgid, GROUP_KILL_TIMEOUT_MS);
   if (gone) {
     liveGroups.delete(pgid);
-    return;
+    return { alreadyGone: false };
   }
   throw new Error(`process group ${String(pgid)} survived SIGKILL`);
 }
@@ -190,6 +205,7 @@ export function startCommand(
   let exitCode: number | null = null;
   let signal: NodeJS.Signals | null = null;
   let closed = false;
+  let endedAt: number | undefined;
   let endedBeforeStop = false;
 
   // Attached before anything can throw. A command that cannot spawn emits `error`, and an
@@ -204,6 +220,7 @@ export function startCommand(
     exitCode = code as number | null;
     signal = closeSignal as NodeJS.Signals | null;
     closed = true;
+    endedAt = Date.now();
     // Deliberately not removing the group here: the leader closing says nothing about its
     // descendants, and this set exists to make sure none of them is left behind.
   });
@@ -227,15 +244,24 @@ export function startCommand(
       // whether the process still exists cannot answer this: a kill is asynchronous, so a
       // doomed process still reports itself alive for a moment afterwards.
       const alreadyClosed = closed;
-      if (pgid !== undefined) await terminateGroup(pgid);
+      const termination = pgid === undefined ? { alreadyGone: true } : await terminateGroup(pgid);
       // The leader's own outcome, not merely the group's absence.
       await exited;
-      // Attribution, not timing: the command ended on its own if it was already over, or if
-      // what ended it was a signal this runner never sent.
-      const ours =
-        pgid === undefined ? new Set<NodeJS.Signals>() : (sentSignals.get(pgid) ?? new Set());
-      endedBeforeStop = alreadyClosed || (signal !== null && !ours.has(signal));
-      if (pgid !== undefined) sentSignals.delete(pgid);
+
+      // Attribution rather than timing. The command ended on its own if it was already over
+      // when the stop began, if the group had already vanished by the time this runner first
+      // signalled, if what ended it was a signal this runner never delivered, or if it ended
+      // before that first delivery. The last two matter because a process can turn an external
+      // signal into an ordinary exit: its own handler calling process.exit(0) leaves no signal
+      // on the outcome at all, so the signal name alone cannot answer this.
+      const record = pgid === undefined ? undefined : groupSignals.get(pgid);
+      const deliveredAt = record?.firstDeliveredAt;
+      endedBeforeStop =
+        alreadyClosed ||
+        termination.alreadyGone ||
+        (signal !== null && record?.sent.has(signal) !== true) ||
+        (endedAt !== undefined && deliveredAt !== undefined && endedAt < deliveredAt);
+      if (pgid !== undefined) groupSignals.delete(pgid);
       return {
         exitCode,
         signal,

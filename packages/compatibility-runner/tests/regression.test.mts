@@ -933,3 +933,40 @@ test("a lifecycle command that does not exist says so", async () => {
   assert.equal(failure.phase, "dev");
   assert.match(failure.message, /could not start.*ENOENT/);
 });
+
+test("a server that turns an external SIGTERM into a clean exit still fails the run", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", { origin: `http://127.0.0.1:${String(port)}` });
+  const pidFile = join(request.artifactRoot, "server.pid");
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
+  };
+  // The server handles SIGTERM itself and exits with code 0, so its outcome carries no signal:
+  // the signal name alone cannot tell this apart from a stop the runner requested.
+  manifest.entries[0]!.commands["dev"] = {
+    argv: [process.execPath, fixture("serve.mjs")],
+    env: { PORT: String(port), OWN_PID_FILE: pidFile, EXIT_ON_SIGTERM: "0" },
+  };
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest,
+    browser: {
+      open: async () => {
+        process.kill(Number(readFileSync(pidFile, "utf8")), "SIGTERM");
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return {
+          evaluate: () => Promise.resolve(undefined),
+          drainEvents: () => [],
+          close: () => Promise.resolve(),
+        };
+      },
+    },
+  });
+  const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as { phase: string; message: string };
+
+  assert.equal(result["outcome"], "fail", "an externally terminated server was recorded as a pass");
+  assert.equal(failure.phase, "dev");
+  assert.match(failure.message, /ended on its own during browser acceptance/);
+});
