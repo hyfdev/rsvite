@@ -45,6 +45,9 @@ export default defineConfig({
       "check:test:elk": {
         command: "vp test --config packages/compatibility-elk/vite.config.ts",
       },
+      "check:test:drawdb": {
+        command: "vp test --config packages/compatibility-drawdb/vite.config.ts",
+      },
       "record:vite-upstream:baseline": {
         command:
           "node --experimental-strip-types packages/compatibility-vite-upstream/scripts/record-vite-baseline.mts",
@@ -60,6 +63,11 @@ export default defineConfig({
           "node --experimental-strip-types packages/compatibility-elk/scripts/record-elk-baseline.mts",
         env: ["ELK_CHECKOUT", "RUNNER_IMAGE"],
       },
+      "record:drawdb:baseline": {
+        command:
+          "node --experimental-strip-types packages/compatibility-drawdb/scripts/record-drawdb-baseline.mts",
+        env: ["RUNNER_IMAGE"],
+      },
       ready: {
         command: "echo ready checks passed",
         dependsOn: [
@@ -71,6 +79,7 @@ export default defineConfig({
           "check:test:vite-upstream",
           "check:test:actual-budget",
           "check:test:elk",
+          "check:test:drawdb",
         ],
       },
     },

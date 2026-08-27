@@ -1,0 +1,76 @@
+{
+  "contractVersion": 1,
+  "manifestEntry": {
+    "id": "drawdb",
+    "sourceCommit": "031aef1f1c1d3f9027ccfacbf084e9c1a31b8abc"
+  },
+  "subject": {
+    "name": "rsvite",
+    "version": "0.0.0"
+  },
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "runnerImage": "local",
+    "nodeVersion": "24.20.0",
+    "packageManager": {
+      "name": "npm",
+      "version": "11.19.0"
+    },
+    "browser": {
+      "name": "chromium",
+      "version": "151.0.7922.34"
+    }
+  },
+  "command": {
+    "argv": ["rsvite", ".", "--port", "37273"],
+    "cwd": "/tmp/rsvite-drawdb-sXMmfC",
+    "exitCode": null
+  },
+  "startedAt": "2026-08-27T18:53:12.828Z",
+  "finishedAt": "2026-08-27T18:53:16.359Z",
+  "outcome": "fail",
+  "javascriptApiLevel": "C0",
+  "capabilityOwners": [
+    {
+      "capability": "html",
+      "owner": "rust"
+    },
+    {
+      "capability": "modules-and-assets",
+      "owner": "rust"
+    },
+    {
+      "capability": "resolution",
+      "owner": "rust"
+    },
+    {
+      "capability": "errors",
+      "owner": "rust"
+    },
+    {
+      "capability": "file-watching",
+      "owner": "rust"
+    },
+    {
+      "capability": "hmr-without-full-reload",
+      "owner": "rust"
+    },
+    {
+      "capability": "framework-lifecycle",
+      "owner": "rust"
+    }
+  ],
+  "explicitFallbacks": [],
+  "browserErrors": [],
+  "artifactPaths": ["install.stdout.log", "install.stderr.log", "dev.stdout.log", "dev.stderr.log"],
+  "firstIncompatibleBehavior": {
+    "phase": "dev",
+    "message": "dev could not start: Error: spawn rsvite ENOENT",
+    "evidencePath": "dev.stderr.log"
+  },
+  "failureClassification": {
+    "kind": "current-compatibility-requirement",
+    "evidence": "The rsvite workspace command failed during dev before DrawDB could exercise the selected dev capabilities: dev could not start: Error: spawn rsvite ENOENT"
+  }
+}
