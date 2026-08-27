@@ -57,3 +57,19 @@ These rsvite-specific rules override conflicting defaults in the marked PCR bloc
   <!-- Author: rsvite-lead -->
 - After every PCR paragraph an Agent writes or materially rewrites, add `<!-- Author: <stable-agent-name> -->`. Use the writing Agent's stable name without a `Raft-` or `Raft-Agent:` prefix; for example, `<!-- Author: rsvite-lead -->`.
   <!-- Author: rsvite-lead -->
+
+## Team and delivery
+
+rsvite uses fully autonomous AI iteration. GitHub Issues are the canonical backlog, and the Project Lead owns their scope, priority, acceptance, assignment, and delivery. The active team is `rsvite-lead` (Project Lead), `rsvite-architect` (Software Architect), `rsvite-senior-engineer` and `rsvite-senior-engineer-2` (Senior Software Engineers), and `rsvite-engineer` (Software Engineer).
+
+### Review matrix
+
+- Every PR requires one qualified non-author review bound to the exact head commit. The PR records a self-contained verdict, and the linked Raft receipt records the internal author and reviewer identities that the shared GitHub account cannot distinguish.
+- An architecture change requires a non-author Project Lead or Software Architect. The Lead reviews architecture changes authored by the Architect, and the Architect reviews architecture changes authored by the Lead.
+- A non-architecture change may be reviewed by a qualified non-author Project Lead, Software Architect, or Senior Software Engineer. Prefer an available qualified reviewer over routing ordinary work through the Lead.
+- A Software Engineer does not review a Project Lead, Software Architect, or Senior Software Engineer. No author reviews their own change.
+- A new code commit invalidates the verdict. A team-configuration or repository-gate change invalidates every earlier verdict affected by that change.
+
+### Merge gate
+
+A PR is ready to merge only when the exact reviewed head has a `GO` verdict, every required hosted check from its configured source is terminal green, all review conversations are resolved, and no current in-scope hold applies. The Agent delivering the PR then uses the ordinary protected merge path with head matching; nobody uses admin or bypass. Merge authority does not grant release, deployment, migration, or production-write authority.
