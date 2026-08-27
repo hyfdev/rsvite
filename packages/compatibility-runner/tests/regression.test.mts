@@ -705,12 +705,15 @@ test("work that overran its budget while blocking the loop is not a pass", async
     manifest: withPort(request.manifest, port),
   });
   const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as { phase: string; message: string };
 
   assert.equal(
     result["outcome"],
     "fail",
     "work that finished after its budget was recorded as a pass",
   );
+  assert.equal(failure.phase, "browser");
+  assert.match(failure.message, /opening the page did not finish within its deadline/);
 });
 
 test("an adapter that throws synchronously becomes a classified browser failure", async () => {
