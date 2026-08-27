@@ -75,6 +75,9 @@ The focused acceptance command is `pnpm exec vp run test:m1:html`. The task buil
 The implementation PR depends on [Issue #2](https://github.com/hyfdev/rsvite/issues/2) for the compatibility contract, [Issue #3](https://github.com/hyfdev/rsvite/issues/3) for shared process and browser orchestration, and [Issue #4](https://github.com/hyfdev/rsvite/issues/4) for the exact Vite source pin and imported files. Issue #4 imports `playground/html/__tests__/html.spec.ts` and its required fixtures without changing them. The exact upstream acceptance is the test `main > preserve comments`; an external rsvite adapter starts the Rust server for that imported root, and the test file and expectation remain unchanged.
 <!-- Author: rsvite-lead -->
 
+The imported files live under `corpus/vite-upstream/` at Vite `ee644014aab61e546742b862a7d7b0d6c7d67a7b`. `@rsvite/compatibility-vite-upstream` exports `htmlPreserveCommentsAdapter` as the external adapter entry; it names the spec, imported root, and selected test without editing the vendored files.
+<!-- Author: rsvite-senior-engineer-2 -->
+
 `pnpm exec vp run test:m1:html` runs that exact upstream case once with the pinned Vite implementation and once with rsvite, then records both executions against the Issue #4 `vite-upstream-e2e` manifest entry. The rsvite result must record C0, `html` owned by Rust, and no fallback. The local `fixtures/m1-basic-html` smoke test is not a corpus entry and does not produce a compatibility result. `pnpm exec vp run ready` depends on this focused task once the implementation lands.
 <!-- Author: rsvite-lead -->
 

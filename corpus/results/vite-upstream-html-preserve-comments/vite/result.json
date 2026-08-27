@@ -1,0 +1,51 @@
+{
+  "contractVersion": 1,
+  "manifestEntry": {
+    "id": "vite-upstream-html-preserve-comments",
+    "sourceCommit": "ee644014aab61e546742b862a7d7b0d6c7d67a7b"
+  },
+  "subject": {
+    "name": "vite",
+    "version": "8.2.2",
+    "commit": "ee644014aab61e546742b862a7d7b0d6c7d67a7b"
+  },
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "runnerImage": "local",
+    "nodeVersion": "24.20.0",
+    "packageManager": {
+      "name": "pnpm",
+      "version": "10.34.5"
+    }
+  },
+  "command": {
+    "argv": [
+      "pnpm",
+      "test-serve",
+      "playground/html",
+      "--testNamePattern",
+      "main preserve comments"
+    ],
+    "cwd": "/root/Documents/github-opensource/.worktrees/vite-ee644014-issue-4-fresh",
+    "exitCode": 0
+  },
+  "startedAt": "2026-08-27T13:49:55.536Z",
+  "finishedAt": "2026-08-27T13:49:57.851Z",
+  "outcome": "pass",
+  "javascriptApiLevel": "C0",
+  "capabilityOwners": [
+    {
+      "capability": "html",
+      "owner": "vite"
+    }
+  ],
+  "explicitFallbacks": [],
+  "browserErrors": [],
+  "artifactPaths": [
+    "install.stdout.log",
+    "install.stderr.log",
+    "test.stdout.log",
+    "test.stderr.log"
+  ]
+}

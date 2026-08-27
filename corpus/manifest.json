@@ -1,0 +1,54 @@
+{
+  "contractVersion": 1,
+  "entries": [
+    {
+      "id": "vite-upstream-html-preserve-comments",
+      "kind": "vite-upstream-e2e",
+      "source": {
+        "repository": "https://github.com/vitejs/vite",
+        "commit": "ee644014aab61e546742b862a7d7b0d6c7d67a7b",
+        "license": {
+          "spdxId": "MIT",
+          "path": "LICENSE"
+        }
+      },
+      "lockfile": {
+        "path": "pnpm-lock.yaml",
+        "packageManager": {
+          "name": "pnpm",
+          "version": "10.34.5"
+        }
+      },
+      "commands": {
+        "install": {
+          "argv": ["pnpm", "install", "--frozen-lockfile"]
+        },
+        "test": {
+          "argv": [
+            "pnpm",
+            "test-serve",
+            "playground/html",
+            "--testNamePattern",
+            "main preserve comments"
+          ]
+        }
+      },
+      "readiness": {
+        "type": "process-exit",
+        "timeoutMs": 900000
+      },
+      "expectedCapabilities": ["html"],
+      "javascriptApiLevel": "C0",
+      "notes": "Imported slice: playground/html/__tests__/html.spec.ts and playground/html/index.html, the fixture that holds the comments asserted by main > preserve comments.",
+      "extensions": {
+        "x-vite-upstream": {
+          "suite": "playground/html",
+          "spec": "playground/html/__tests__/html.spec.ts",
+          "testName": "main > preserve comments",
+          "importedRoot": "playground/html",
+          "mode": "serve"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/vitejs/vite",
+  "commit": "ee644014aab61e546742b862a7d7b0d6c7d67a7b",
+  "files": [
+    {
+      "source": "LICENSE",
+      "dest": "LICENSE",
+      "sha256": "692057af3d664cbb79ac38293eb50aa3c4987f8182e2a440136e59e08f1b4a54"
+    },
+    {
+      "source": "playground/html/__tests__/html.spec.ts",
+      "dest": "playground/html/__tests__/html.spec.ts",
+      "sha256": "32cc79fab45d3c9ccfa68493136cda83d9bada2fe38c917a5d43674132b60781"
+    },
+    {
+      "source": "playground/html/index.html",
+      "dest": "playground/html/index.html",
+      "sha256": "d5d60a54bf45c78e30f9c862c92cfd8ccfb8a808143b1747cb96eb713c103511"
+    }
+  ],
+  "exceptions": []
+}

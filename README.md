@@ -2,7 +2,7 @@
 
 rsvite is a Rust implementation of Vite for existing Vite projects. Users start it through Node.js and npm; Node enters the Rust core through `napi-rs`, while JavaScript remains available for the configuration, plugins, and runtime behavior that must execute in JavaScript.
 
-No development path is implemented yet. The repository currently provides the product records and the shared Rust/JavaScript workspace scaffold.
+No development path is implemented yet. The repository currently provides the product records, the shared Rust/JavaScript workspace scaffold, and a pinned Vite upstream HTML E2E slice under `corpus/vite-upstream/`.
 
 Compatibility is measured against pinned Vite upstream E2E tests and pinned real projects. The current milestones establish that evidence and then build the first Node-started Rust development path.
 
