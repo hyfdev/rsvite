@@ -21,6 +21,14 @@ export interface CommandOutcome {
 export interface StartedCommand {
   /** Resolves once no process in the group is left, not merely once the leader closed. */
   stop(): Promise<CommandOutcome>;
+  /**
+   * The leader closed on its own, before `stop` asked it to. A long-running command that ends
+   * by itself after reporting readiness has not been stopped — it has failed, and the run has
+   * to notice the difference.
+   */
+  exitedOnItsOwn(): boolean;
+  /** The exit code seen so far, for a command that ended without being stopped. */
+  exitCodeSoFar(): number | null;
   /** Everything written so far, for readiness detection while the process runs. */
   readStdout(): string;
   readStderr(): string;
@@ -116,6 +124,8 @@ interface Capture {
 }
 
 function capture(child: ChildProcess, logPaths?: { stdout: string; stderr: string }): Capture {
+  // Streams are closed on `error` as well as on `close`; a command that never started still
+  // opened its log files.
   const buffers: Capture = { stdout: "", stderr: "" };
   const streams = logPaths
     ? { stdout: createWriteStream(logPaths.stdout), stderr: createWriteStream(logPaths.stderr) }
@@ -129,10 +139,12 @@ function capture(child: ChildProcess, logPaths?: { stdout: string; stderr: strin
     buffers.stderr += chunk.toString("utf8");
     streams?.stderr.write(chunk);
   });
-  child.once("close", () => {
+  const endStreams = (): void => {
     streams?.stdout.end();
     streams?.stderr.end();
-  });
+  };
+  child.once("close", endStreams);
+  child.once("error", endStreams);
   return buffers;
 }
 
@@ -142,28 +154,47 @@ export function startCommand(
   logPaths?: { stdout: string; stderr: string },
 ): StartedCommand {
   const child = spawnGroup(command);
-  const pgid = child.pid;
-  if (pgid === undefined) throw new Error("the command did not start");
-  liveGroups.add(pgid);
-
   const buffers = capture(child, logPaths);
 
   let exitCode: number | null = null;
   let signal: NodeJS.Signals | null = null;
-  const exited = once(child, "close").then(([code, closeSignal]) => {
+  let closed = false;
+  let stopping = false;
+
+  // Attached before anything can throw. A command that cannot spawn emits `error`, and an
+  // unhandled `error` on a ChildProcess terminates the host — a missing executable is a
+  // command failure, not permission to take the orchestrator down with it.
+  const failedToSpawn = once(child, "error").then(([error]) => {
+    buffers.stderr += `${String(error)}\n`;
+    closed = true;
+  });
+
+  const closedNormally = once(child, "close").then(([code, closeSignal]) => {
     exitCode = code as number | null;
     signal = closeSignal as NodeJS.Signals | null;
+    closed = true;
     // Deliberately not removing the group here: the leader closing says nothing about its
     // descendants, and this set exists to make sure none of them is left behind.
   });
+
+  const exited = Promise.race([closedNormally, failedToSpawn]);
   exited.catch(() => undefined);
+  void closedNormally.catch(() => undefined);
+  void failedToSpawn.catch(() => undefined);
+
+  const pgid = child.pid;
+  if (pgid !== undefined) liveGroups.add(pgid);
 
   return {
     readStdout: () => buffers.stdout,
     readStderr: () => buffers.stderr,
     exited,
+    exitedOnItsOwn: () => closed && !stopping,
+    exitCodeSoFar: () => exitCode,
     async stop(): Promise<CommandOutcome> {
-      await terminateGroup(pgid);
+      stopping = true;
+      if (pgid !== undefined) await terminateGroup(pgid);
+      await Promise.race([exited, sleep(0)]);
       return { exitCode, signal, timedOut: false, stdout: buffers.stdout, stderr: buffers.stderr };
     },
   };

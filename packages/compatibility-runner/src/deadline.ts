@@ -100,7 +100,16 @@ export function deadline(ms: number, parent?: AbortSignal): Deadline {
 
 export type Bounded<T> =
   | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly reason: string };
+  | {
+      readonly ok: false;
+      readonly reason: string;
+      /**
+       * A value the work produced after its deadline passed. The operation obeyed the contract
+       * and settled on abort, so whatever it produced still needs releasing — dropping it is
+       * how a browser page survives the run that gave up on it.
+       */
+      readonly late?: T;
+    };
 
 /**
  * Runs `start` under `bound`. On expiry the work is aborted and then awaited: the runner does
@@ -130,16 +139,17 @@ export async function runUnder<T>(
   const first = await Promise.race([settled, expiry]);
   if (first !== "expired") return first;
 
-  const cleanup = deadline(cleanupMs);
+  const grace = timer(cleanupMs, "abandoned" as const);
+  let outcome: Awaited<typeof settled> | "abandoned";
   try {
-    const after = await Promise.race([
-      settled,
-      sleep(cleanupMs, cleanup.signal).then(() => "abandoned" as const),
-    ]);
-    if (after === "abandoned") throw new AbandonedWorkError(what, cleanupMs);
+    outcome = await Promise.race([settled, grace.promise]);
   } finally {
-    cleanup.dispose();
+    grace.cancel();
   }
+  if (outcome === "abandoned") throw new AbandonedWorkError(what, cleanupMs);
 
-  return { ok: false, reason: `${what} did not finish within its deadline` };
+  const reason = `${what} did not finish within its deadline`;
+  // The work obeyed the contract and produced something after the deadline. Handing it back is
+  // what lets the caller release it; dropping it is how a browser page survives the run.
+  return outcome.ok ? { ok: false, reason, late: outcome.value } : { ok: false, reason };
 }

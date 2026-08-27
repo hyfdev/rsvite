@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { createContractValidators } from "@rsvite/compatibility-contract";
 import {
@@ -108,6 +108,8 @@ const CLEANUP_GRACE_MS = 1_000;
 
 const HMR_CAPABILITY = "hmr-without-full-reload";
 
+const LIFECYCLE_NAMES: readonly LifecycleName[] = ["dev", "build", "preview", "test"];
+
 interface ManifestEntry {
   readonly id: string;
   readonly source: { readonly commit: string };
@@ -176,30 +178,43 @@ export async function runCompatibilityCheck(request: RunRequest): Promise<RunRep
   if (lifecycle === undefined) {
     throw new Error(`entry ${entry.id} declares no ${request.lifecycle} command`);
   }
+  const resolved = {
+    install: inProject(install, request.projectRoot),
+    lifecycle: inProject(lifecycle, request.projectRoot),
+  };
 
   const now = request.now ?? (() => new Date());
   const startedAt = now().toISOString();
 
   await mkdir(request.artifactRoot, { recursive: true });
+  // A reused directory must not donate evidence to this run: existence alone cannot tell a log
+  // this run wrote from one left by an earlier one, so the runner clears what it owns first.
+  await Promise.all(
+    ["install", ...LIFECYCLE_NAMES].flatMap((label) => {
+      const pair = logPaths(request.artifactRoot, label);
+      return [rm(pair.stdout, { force: true }), rm(pair.stderr, { force: true })];
+    }),
+  );
+  await rm(join(request.artifactRoot, "result.json"), { force: true });
   const logs = {
     install: logPaths(request.artifactRoot, "install"),
     lifecycle: logPaths(request.artifactRoot, request.lifecycle),
   };
 
   const installOutcome = await runCommand(
-    inProject(install, request.projectRoot),
+    resolved.install,
     request.timeouts.installMs,
     logs.install,
   );
   const installProblem = describeExit(installOutcome, "install");
   if (installProblem !== undefined) {
-    return finish(validators, request, entry, startedAt, now, logs, installOutcome, [], {
+    return finish(validators, request, entry, resolved, startedAt, now, logs, installOutcome, [], {
       phase: "install",
       message: installProblem,
     });
   }
 
-  const started = startCommand(inProject(lifecycle, request.projectRoot), logs.lifecycle);
+  const started = startCommand(resolved.lifecycle, logs.lifecycle);
   // One budget, starting at spawn, owning every step underneath it. Readiness and the browser
   // derive from it rather than waiting independently, so a slow start cannot buy the browser
   // more time than the caller allowed for the whole phase.
@@ -208,17 +223,25 @@ export async function runCompatibilityCheck(request: RunRequest): Promise<RunRep
   let failure: RunFailure | undefined;
   let lifecycleOutcome: CommandOutcome;
 
+  let exitedDuringAcceptance = false;
   try {
     const observed = await lifecyclePhase(request, entry, started, lifecycleBound);
     events = observed.events;
     failure = observed.failure;
+    exitedDuringAcceptance = started.exitedOnItsOwn();
   } finally {
     lifecycleBound.dispose();
     lifecycleOutcome = await started.stop();
   }
 
-  if (failure === undefined && entry.readiness.type === "process-exit") {
-    const exitProblem = describeExit(lifecycleOutcome, request.lifecycle);
+  if (failure === undefined) {
+    // A command that ends by itself after reporting readiness has failed, whatever readiness
+    // the manifest declared. Only `process-exit` readiness expects the command to end at all,
+    // and even then a nonzero code is a failure.
+    const exitProblem =
+      entry.readiness.type === "process-exit" || exitedDuringAcceptance
+        ? describeExit(lifecycleOutcome, request.lifecycle)
+        : undefined;
     if (exitProblem !== undefined) failure = { phase: request.lifecycle, message: exitProblem };
   }
 
@@ -226,6 +249,7 @@ export async function runCompatibilityCheck(request: RunRequest): Promise<RunRep
     validators,
     request,
     entry,
+    resolved,
     startedAt,
     now,
     logs,
@@ -343,7 +367,11 @@ async function observeBrowser(
       "opening the page",
       CLEANUP_GRACE_MS,
     );
-    if (!opened.ok) return { events: [], failure: { phase: "browser", message: opened.reason } };
+    if (!opened.ok) {
+      // The adapter may have obeyed the contract and produced the page just after the abort.
+      if (opened.late !== undefined) await closeOrFail(opened.late);
+      return { events: [], failure: { phase: "browser", message: opened.reason } };
+    }
 
     const page = opened.value;
     const events: BrowserEvent[] = [];
@@ -352,6 +380,11 @@ async function observeBrowser(
       const before = await readSentinel(page, expression, browserBound);
       if (!before.ok) return { events, failure: { phase: "browser", message: before.reason } };
       events.push(...page.drainEvents());
+
+      // Checked here, before the update, so an error the page reported on load is the first
+      // incompatible behavior rather than whatever the update happens to produce later.
+      const onLoad = firstBrowserError(events);
+      if (onLoad !== undefined) return { events, failure: onLoad };
 
       if (claimsHmr && before.value === undefined) {
         return {
@@ -404,11 +437,17 @@ async function observeBrowser(
       }
       return { events };
     } finally {
-      await closeQuietly(page);
+      await closeOrFail(page);
     }
   } finally {
     browserBound.dispose();
   }
+}
+
+function firstBrowserError(events: readonly BrowserEvent[]): RunFailure | undefined {
+  const first = normalizeEvents(events).errors[0];
+  if (first === undefined) return undefined;
+  return { phase: "browser", message: `${first.type}: ${first.message}` };
 }
 
 async function readSentinel(
@@ -426,13 +465,21 @@ async function readSentinel(
 }
 
 /**
- * Cleanup gets its own deadline. Handing `close` the already-aborted operation signal would let
- * an adapter reject immediately and skip the cleanup this call exists to perform.
+ * Cleanup gets its own deadline: handing `close` the already-aborted operation signal would let
+ * an adapter reject immediately and skip the cleanup this call exists to perform. A close that
+ * fails raises, because a result written over a browser that is still open describes a run whose
+ * resources nobody accounted for.
  */
-async function closeQuietly(page: BrowserPage): Promise<void> {
+async function closeOrFail(page: BrowserPage): Promise<void> {
   const cleanup = deadline(CLEANUP_GRACE_MS);
   try {
-    await runUnder((signal) => page.close(signal), cleanup, "closing the page", CLEANUP_GRACE_MS);
+    const closed = await runUnder(
+      (signal) => page.close(signal),
+      cleanup,
+      "closing the page",
+      CLEANUP_GRACE_MS,
+    );
+    if (!closed.ok) throw new Error(closed.reason);
   } finally {
     cleanup.dispose();
   }
@@ -442,6 +489,7 @@ async function finish(
   validators: ReturnType<typeof createContractValidators>,
   request: RunRequest,
   entry: ManifestEntry,
+  resolved: { install: CommandSpec; lifecycle: CommandSpec },
   startedAt: string,
   now: () => Date,
   logs: { install: LogPaths; lifecycle: LogPaths },
@@ -471,8 +519,12 @@ async function finish(
     },
     environment: request.environment,
     command: {
+      // The command as it actually ran, including a manifest `cwd` resolved under the project
+      // root. Recording the project root instead would describe a run that did not happen.
       argv: [...(entry.commands[commandName]?.argv ?? [])],
-      cwd: request.projectRoot,
+      cwd:
+        (failedPhase === "install" ? resolved.install : resolved.lifecycle).cwd ??
+        request.projectRoot,
       exitCode: outcome.exitCode,
     },
     startedAt,

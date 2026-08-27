@@ -43,9 +43,18 @@ export interface SyntheticScript {
   readonly stepDelayMs?: number;
   /** Never settles, not even when aborted — an adapter that breaks the contract. */
   readonly ignoresAbort?: "open" | "evaluate";
+  /**
+   * `open` settles *successfully* from its abort handler. The adapter obeys the contract, so
+   * the page it produced still has to be released by whoever gave up waiting for it.
+   */
+  readonly resolveOnAbort?: boolean;
+  /** `close` rejects, standing in for a page that would not go away. */
+  readonly closeFails?: string;
 }
 
 export interface SyntheticPage extends BrowserPage {
+  /** How many times `close` was called, so a leaked page is observable. */
+  closeCalls(): number;
   /** Replaces the current document, as a real full reload would. */
   navigate(url: string, memory?: Readonly<Record<string, unknown>>): void;
   /** Emits an event without replacing the document. */
@@ -70,6 +79,7 @@ export function createSyntheticBrowser(script: SyntheticScript = {}): BrowserAda
       let memory: Record<string, unknown> = { ...script.documentMemory };
       let pending: BrowserEvent[] = [...(script.openEvents ?? [])];
       let closed = false;
+      let closes = 0;
 
       const page: SyntheticPage = {
         async evaluate(expression, signal) {
@@ -93,14 +103,22 @@ export function createSyntheticBrowser(script: SyntheticScript = {}): BrowserAda
         emit(event) {
           pending.push(event);
         },
+        closeCalls: () => closes,
         close() {
+          closes += 1;
+          closed = true;
+          if (script.closeFails !== undefined) return Promise.reject(new Error(script.closeFails));
           closed = true;
           return Promise.resolve();
         },
       };
 
-      void request;
       last = page;
+      if (script.resolveOnAbort === true) {
+        return new Promise((resolve) => {
+          request.signal.addEventListener("abort", () => resolve(page), { once: true });
+        });
+      }
       if (script.stepDelayMs !== undefined) return paused(script.stepDelayMs).then(() => page);
       return Promise.resolve(page);
     },

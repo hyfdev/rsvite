@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -363,4 +364,151 @@ test("a completed run leaves no timer holding the host open", async () => {
     elapsed < 1_800,
     `the host stayed alive after its work finished (${String(elapsed)}ms)`,
   );
+});
+
+test("a lifecycle process that dies after readiness cannot be recorded as a pass", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser: createSyntheticBrowser({ stepDelayMs: 150 }),
+    timeouts: { installMs: 10_000, lifecycleMs: 10_000, browserMs: 5_000 },
+  });
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
+  };
+  // HTTP readiness, then the server exits by itself while the browser is still working.
+  manifest.entries[0]!.commands["dev"] = {
+    argv: [process.execPath, fixture("flaky-server.mjs")],
+    env: { PORT: String(port), EXIT_AFTER_MS: "100", EXIT_CODE: "7" },
+  };
+
+  const report = await runCompatibilityCheck({ ...request, manifest });
+  const result = report.result as Record<string, unknown>;
+
+  assert.equal(result["outcome"], "fail", "a process that exited with 7 was recorded as a pass");
+  assert.equal((result["command"] as { exitCode: number }).exitCode, 7);
+});
+
+test("a command that cannot spawn is a failure, not a dead host", async () => {
+  const probe = fileURLToPath(new URL("./spawn-failure-probe.mts", import.meta.url));
+
+  const finished = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+    (resolve) => {
+      const child = spawn(process.execPath, ["--experimental-strip-types", probe], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
+      child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")));
+      child.once("close", (code) => resolve({ code, stdout, stderr }));
+    },
+  );
+
+  assert.equal(finished.code, 0, `the host died on a failed spawn: ${finished.stderr}`);
+  const observed = JSON.parse(finished.stdout.trim()) as {
+    exitCode: number | null;
+    sawEnoent: boolean;
+  };
+  assert.equal(observed.sawEnoent, true, "the spawn error was not recorded on the command output");
+});
+
+test("a page produced just after the deadline is still closed", async () => {
+  const port = await freePort();
+  const browser = createSyntheticBrowser({ resolveOnAbort: true });
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser,
+    timeouts: { installMs: 10_000, lifecycleMs: 30_000, browserMs: 200 },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+
+  assert.equal((report.result as Record<string, unknown>)["outcome"], "fail");
+  assert.ok(
+    (browser.lastPage()?.closeCalls() ?? 0) > 0,
+    "the page the adapter produced after the abort was never closed",
+  );
+});
+
+test("a page that refuses to close fails the run instead of passing it", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser: createSyntheticBrowser({ closeFails: "page remained open" }),
+  });
+
+  await assert.rejects(
+    runCompatibilityCheck({ ...request, manifest: withPort(request.manifest, port) }),
+    /closing the page/,
+  );
+  assert.equal(
+    existsSync(join(request.artifactRoot, "result.json")),
+    false,
+    "a result was written for a run whose page never closed",
+  );
+});
+
+test("the recorded command cwd is the directory the command actually ran in", async () => {
+  const request = await baseRequest("rsvite");
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: {
+      commands: Record<string, { argv: string[]; cwd?: string; env?: Record<string, string> }>;
+    }[];
+  };
+  manifest.entries[0]!.commands["install"]!.cwd = ".";
+  manifest.entries[0]!.commands["install"]!.env = { EXIT_CODE: "3" };
+
+  const report = await runCompatibilityCheck({ ...request, manifest });
+  const command = (report.result as Record<string, unknown>)["command"] as { cwd: string };
+
+  assert.equal(command.cwd, join(request.projectRoot, "."));
+});
+
+test("a reused artifact directory cannot donate evidence to this run", async () => {
+  const request = await baseRequest("rsvite");
+  await mkdir(request.artifactRoot, { recursive: true });
+  // Logs left by an earlier run of a different lifecycle command.
+  await writeFile(join(request.artifactRoot, "dev.stdout.log"), "stale", "utf8");
+  await writeFile(join(request.artifactRoot, "dev.stderr.log"), "stale", "utf8");
+
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: { commands: Record<string, { env?: Record<string, string> }> }[];
+  };
+  manifest.entries[0]!.commands["install"]!.env = { EXIT_CODE: "3" };
+
+  const report = await runCompatibilityCheck({ ...request, manifest });
+  const artifactPaths = (report.result as Record<string, unknown>)["artifactPaths"] as string[];
+
+  assert.deepEqual(artifactPaths, ["install.stdout.log", "install.stderr.log"]);
+});
+
+test("the first incompatible behavior is the first one observed", async () => {
+  const port = await freePort();
+  const browser = createSyntheticBrowser({
+    documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
+    openEvents: [{ type: "console-error", message: "first failure" }],
+  });
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser,
+    update: () => {
+      browser.lastPage()?.navigate(`http://127.0.0.1:${String(port)}/`);
+      return Promise.resolve();
+    },
+  });
+
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest: withPort(request.manifest, port),
+  });
+  const failure = (report.result as Record<string, unknown>)["firstIncompatibleBehavior"] as {
+    message: string;
+  };
+
+  // The console error happened on load; the navigation came later during the update.
+  assert.match(failure.message, /console-error: first failure/);
 });
