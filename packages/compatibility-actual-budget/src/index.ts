@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CommandSpec } from "@rsvite/compatibility-runner";
+import type { CommandSpec, DeclaredRunInputs } from "@rsvite/compatibility-runner";
 import { SENTINEL_EXPRESSION } from "./browser.ts";
 
 /** The pinned identity of the validated project, kept out of code so a change is reviewable. */
@@ -162,5 +162,71 @@ export function upstreamE2eCommand(origin: string, pin: Pin = readPin()): Comman
       "--retries=0",
     ],
     env: { E2E_START_URL: origin, CI: "1" },
+  };
+}
+
+/**
+ * The same input, driven by rsvite instead of by the project's own toolchain.
+ *
+ * Installing is the project's own install: substituting the bundler does not change the
+ * dependencies of the thing being measured. The development command is rsvite's Vite-compatible
+ * entry point as this workspace would publish it — running the project is exactly what a
+ * drop-in replacement has to be able to do, so that is what the corpus attempts and records,
+ * whether or not the entry point exists yet.
+ */
+export function rsviteCommands(
+  repoRoot: string,
+  pin: Pin = readPin(),
+): Record<string, CommandSpec> {
+  const rsvite = join(repoRoot, "node_modules/.bin/rsvite");
+  return {
+    install: { argv: ["corepack", "yarn", "install", "--immutable"] },
+    dev: { argv: [rsvite, "dev", "--port", String(pin.devPort)], env: { BROWSER: "none" } },
+    build: { argv: [rsvite, "build"] },
+    preview: { argv: [rsvite, "preview", "--port", String(pin.devPort)], env: { BROWSER: "none" } },
+  };
+}
+
+/**
+ * What the Vite baseline sets out to show. Vite owns every capability it demonstrates and has
+ * nothing to fall back to, so a baseline failure is a statement about the input rather than
+ * about an implementation gap: it means the corpus entry itself cannot be used as a gate.
+ */
+export function viteDeclaration(): DeclaredRunInputs {
+  return {
+    javascriptApiLevel: "C1",
+    capabilityOwners: [
+      "html",
+      "modules-and-assets",
+      "resolution",
+      "file-watching",
+      "hmr-without-full-reload",
+    ].map((capability) => ({ capability, owner: "vite" })),
+    explicitFallbacks: [],
+    classifyFailure: (failure) => ({
+      kind: "current-compatibility-requirement",
+      evidence: `The original Vite baseline failed during ${failure.phase}, so the input itself is not usable as a gate until this is understood.`,
+    }),
+  };
+}
+
+/**
+ * What an rsvite run sets out to obtain from rsvite, and from which side of it.
+ *
+ * Only the first thing the development lifecycle needs is declared. Serving the project entry is
+ * what a run has to get past before any later capability is even attempted, so claiming the rest
+ * would put expectations in the record that this run was never in a position to test. Nothing is
+ * carried by compatibility JavaScript: the point of the entry is what the Rust core can do with
+ * the project as it stands.
+ */
+export function rsviteDeclaration(): DeclaredRunInputs {
+  return {
+    javascriptApiLevel: "C0",
+    capabilityOwners: [{ capability: "html", owner: "rust" }],
+    explicitFallbacks: [],
+    classifyFailure: (failure) => ({
+      kind: "current-compatibility-requirement",
+      evidence: `Actual Budget is a current compatibility requirement, and rsvite diverges from the Vite baseline recorded beside this result at ${failure.phase}, which is the first lifecycle step the project needs.`,
+    }),
   };
 }

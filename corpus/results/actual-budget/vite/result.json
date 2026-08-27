@@ -19,7 +19,7 @@
     },
     "browser": {
       "name": "chromium",
-      "version": "1.61.1"
+      "version": "149.0.7827.55"
     }
   },
   "command": {
@@ -27,8 +27,8 @@
     "cwd": "/root/.slock/agents/51a222ec-bcd0-4f4b-b39e-0d43c4c72273/work/corpus/actual",
     "exitCode": null
   },
-  "startedAt": "2026-08-27T14:13:12.729Z",
-  "finishedAt": "2026-08-27T14:13:58.838Z",
+  "startedAt": "2026-08-27T14:59:25.510Z",
+  "finishedAt": "2026-08-27T15:00:13.486Z",
   "outcome": "pass",
   "javascriptApiLevel": "C1",
   "capabilityOwners": [

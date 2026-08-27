@@ -1,0 +1,53 @@
+{
+  "contractVersion": 1,
+  "manifestEntry": {
+    "id": "actual-budget",
+    "sourceCommit": "766cc8a7244c35f575ecc33a7a718b060cb5d496"
+  },
+  "subject": {
+    "name": "rsvite",
+    "version": "0.0.0"
+  },
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "runnerImage": "local",
+    "nodeVersion": "24.20.0",
+    "packageManager": {
+      "name": "yarn",
+      "version": "4.17.1"
+    }
+  },
+  "command": {
+    "argv": [
+      "/root/.slock/agents/51a222ec-bcd0-4f4b-b39e-0d43c4c72273/work/rsvite-task17/node_modules/.bin/rsvite",
+      "dev",
+      "--port",
+      "3001"
+    ],
+    "cwd": "/root/.slock/agents/51a222ec-bcd0-4f4b-b39e-0d43c4c72273/work/corpus/actual",
+    "exitCode": null
+  },
+  "startedAt": "2026-08-27T14:58:47.748Z",
+  "finishedAt": "2026-08-27T14:58:51.994Z",
+  "outcome": "fail",
+  "javascriptApiLevel": "C0",
+  "capabilityOwners": [
+    {
+      "capability": "html",
+      "owner": "rust"
+    }
+  ],
+  "explicitFallbacks": [],
+  "browserErrors": [],
+  "artifactPaths": ["install.stdout.log", "install.stderr.log", "dev.stdout.log", "dev.stderr.log"],
+  "firstIncompatibleBehavior": {
+    "phase": "dev",
+    "message": "dev could not start: Error: spawn /root/.slock/agents/51a222ec-bcd0-4f4b-b39e-0d43c4c72273/work/rsvite-task17/node_modules/.bin/rsvite ENOENT",
+    "evidencePath": "dev.stderr.log"
+  },
+  "failureClassification": {
+    "kind": "current-compatibility-requirement",
+    "evidence": "Actual Budget is a current compatibility requirement, and rsvite diverges from the Vite baseline recorded beside this result at dev, which is the first lifecycle step the project needs."
+  }
+}

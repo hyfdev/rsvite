@@ -1,123 +1,199 @@
-// Records the Vite baseline for the pinned Actual Budget checkout by driving the project's own
-// development server, onboarding E2E spec and browser build through the canonical runner.
-import { execFileSync } from "node:child_process";
+// Records the Actual Budget corpus evidence for both subjects against one pinned checkout.
+//
+// Inputs, all of which the recording declares rather than assumes:
+//   ACTUAL_BUDGET_CHECKOUT  required. A clean git checkout at the commit `pin.json` names.
+//   RUNNER_IMAGE            required. How this environment is identified in the result, so two
+//                           results are only comparable when they say they were produced alike.
+//   RECORD_SUBJECTS         optional. "both" (default), "vite" or "rsvite".
+//
+// The pinned checkout's own Chromium is started once before the baseline, and installed through
+// the project's own Playwright if it is not there yet. See ../README.md.
 import { readFileSync, writeFileSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runCompatibilityCheck } from "@rsvite/compatibility-runner";
-import { assertPinnedCheckout, devOrigin, readPin, upstreamE2eCommand } from "../src/index.ts";
-import { createPlaywrightBrowser } from "../src/browser.ts";
+import type { RunEnvironment } from "@rsvite/compatibility-runner";
+import {
+  actualBudgetCommands,
+  devOrigin,
+  readPin,
+  rsviteCommands,
+  rsviteDeclaration,
+  upstreamE2eCommand,
+  viteDeclaration,
+  type Pin,
+} from "../src/index.ts";
+import { createPlaywrightBrowser, readBrowserVersion } from "../src/browser.ts";
+import { manifestForSubject, record, waitForText, type Recording } from "../src/record.ts";
+import { runUpstreamOrThrow } from "../src/upstream.ts";
+
+const INSTALL_MS = 900_000;
+const BUILD_MS = 1_200_000;
+const UPSTREAM_SPEC_MS = 900_000;
+const BROWSER_INSTALL_MS = 900_000;
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
-const checkout = process.env["ACTUAL_BUDGET_CHECKOUT"];
-if (checkout === undefined) {
-  throw new Error("set ACTUAL_BUDGET_CHECKOUT to the pinned Actual Budget checkout");
-}
+const checkout = required("ACTUAL_BUDGET_CHECKOUT");
+const runnerImage = required("RUNNER_IMAGE");
+const subjects = process.env["RECORD_SUBJECTS"] ?? "both";
 
 const pin = readPin();
-assertPinnedCheckout(checkout, pin);
+const manifest: unknown = JSON.parse(readFileSync(join(repoRoot, "corpus/manifest.json"), "utf8"));
+const resultsRoot = join(repoRoot, "corpus/results", pin.entryId);
 
-const manifest = JSON.parse(readFileSync(join(repoRoot, "corpus/manifest.json"), "utf8")) as {
-  entries: { id: string }[];
-};
-const artifactRoot = join(repoRoot, "corpus/results", pin.entryId, "vite");
-await mkdir(artifactRoot, { recursive: true });
-
-const editPath = join(checkout, pin.sentinelEditPath);
-const original = readFileSync(editPath, "utf8");
-
-/** Runs the project's own spec against the server the runner started. */
-function runUpstreamSpec(origin: string): void {
-  const command = upstreamE2eCommand(origin, pin);
-  const [file, ...args] = command.argv;
-  execFileSync(file as string, args, {
-    cwd: checkout,
-    env: { ...process.env, ...command.env },
-    stdio: "inherit",
-  });
+function required(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value === "") {
+    throw new Error(`set ${name}: the recording declares its inputs rather than guessing them`);
+  }
+  return value;
 }
 
-try {
-  const report = await runCompatibilityCheck({
-    manifest,
+function environment(browser?: { name: string; version: string }): RunEnvironment {
+  return {
+    os: process.platform,
+    arch: process.arch,
+    runnerImage,
+    nodeVersion: process.versions.node,
+    packageManager: pin.lockfile.packageManager,
+    ...(browser === undefined ? {} : { browser }),
+  };
+}
+
+function roots(subject: string): { publishRoot: string; stagingRoot: string } {
+  return {
+    publishRoot: join(resultsRoot, subject),
+    stagingRoot: join(resultsRoot, `${subject}.recording`),
+  };
+}
+
+/**
+ * The version of the browser that will actually run — asked of a launched browser, because the
+ * Playwright library's own version is a different number and recording it would describe
+ * something no run ever used. A missing browser is installed rather than assumed.
+ */
+async function prepareBrowser(): Promise<string> {
+  try {
+    return await readBrowserVersion(checkout);
+  } catch (missing) {
+    await runUpstreamOrThrow({
+      label: "the project's own browser install",
+      command: {
+        argv: [
+          "corepack",
+          "yarn",
+          "workspace",
+          "@actual-app/web",
+          "playwright",
+          "install",
+          "chromium",
+        ],
+        cwd: checkout,
+      },
+      timeoutMs: BROWSER_INSTALL_MS,
+    });
+    try {
+      return await readBrowserVersion(checkout);
+    } catch (stillMissing) {
+      throw new Error(
+        `the pinned checkout has no usable Chromium: ${String(stillMissing)} (before installing: ${String(missing)})`,
+      );
+    }
+  }
+}
+
+/** rsvite against the same input: the project's own commands, run by rsvite instead of Vite. */
+async function recordRsvite(): Promise<Recording> {
+  return record({
+    checkoutRoot: checkout,
+    manifest: manifestForSubject(manifest, pin.entryId, rsviteCommands(repoRoot, pin)),
+    pin,
     entryId: pin.entryId,
     lifecycle: "dev",
-    subject: { name: "vite", version: viteVersion(checkout) },
-    environment: {
-      os: process.platform,
-      arch: process.arch,
-      runnerImage: process.env["RUNNER_IMAGE"] ?? "local",
-      nodeVersion: process.versions.node,
-      packageManager: pin.lockfile.packageManager,
-      browser: { name: "chromium", version: chromiumVersion(checkout) },
-    },
-    projectRoot: checkout,
-    artifactRoot,
+    subject: { name: "rsvite", version: "0.0.0" },
+    // No browser is named: none was launched, and naming one would describe a step that never
+    // happened.
+    environment: environment(),
+    declared: rsviteDeclaration(),
+    ...roots("rsvite"),
     origin: devOrigin(pin),
-    declared: {
-      javascriptApiLevel: "C1",
-      capabilityOwners: [
-        "html",
-        "modules-and-assets",
-        "resolution",
-        "file-watching",
-        "hmr-without-full-reload",
-      ].map((capability) => ({ capability, owner: "vite" })),
-      explicitFallbacks: [],
-      classifyFailure: (failure) => ({
-        kind: "current-compatibility-requirement",
-        evidence: `The original Vite baseline failed during ${failure.phase}, so the input itself is not usable as a gate until this is understood.`,
-      }),
-    },
-    browser: createPlaywrightBrowser(checkout),
-    update: async (page, signal) => {
-      // The project's own acceptance first: it must still pass against the runner's server.
-      runUpstreamSpec(devOrigin(pin));
-      // Then one source edit, which the development server is expected to patch into the
-      // running document rather than replace it.
-      writeFileSync(editPath, original.replace(pin.sentinelEdit.find, pin.sentinelEdit.replace));
-      await waitForText(page, pin.sentinelEdit.expectedText, signal);
-    },
-    timeouts: { installMs: 900_000, lifecycleMs: 900_000, browserMs: 300_000 },
+    timeouts: { installMs: INSTALL_MS, lifecycleMs: 300_000, browserMs: 60_000 },
   });
-
-  execFileSync("corepack", ["yarn", "build:browser"], { cwd: checkout, stdio: "inherit" });
-
-  console.log(JSON.stringify({ resultPath: report.resultPath, failure: report.failure }, null, 2));
-} finally {
-  // The checkout is evidence only while it is the pinned one; the edit never outlives the run.
-  writeFileSync(editPath, original);
 }
 
-async function waitForText(
-  page: { evaluate: (expression: string, signal: AbortSignal) => Promise<unknown> },
-  text: string,
-  signal: AbortSignal,
-): Promise<void> {
-  const deadline = Date.now() + 120_000;
-  while (Date.now() < deadline) {
-    if (signal.aborted) throw new Error("the update was aborted");
-    const found = await page.evaluate(
-      `document.body.innerText.includes(${JSON.stringify(text)})`,
-      signal,
-    );
-    if (found === true) return;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`the update never produced ${JSON.stringify(text)}`);
+/** The Vite baseline: the project's own build, then its own spec, then one update. */
+async function recordVite(pinned: Pin, browserVersion: string): Promise<Recording> {
+  const { publishRoot, stagingRoot } = roots("vite");
+  const editPath = join(checkout, pinned.sentinelEditPath);
+  const original = readFileSync(editPath, "utf8");
+  const build = actualBudgetCommands(pinned)["build"];
+  if (build === undefined) throw new Error("the adapter names no build command for this project");
+
+  return record({
+    checkoutRoot: checkout,
+    manifest,
+    pin: pinned,
+    entryId: pinned.entryId,
+    lifecycle: "dev",
+    subject: { name: "vite", version: viteVersion() },
+    environment: environment({ name: "chromium", version: browserVersion }),
+    declared: viteDeclaration(),
+    publishRoot,
+    stagingRoot,
+    origin: devOrigin(pinned),
+    browser: createPlaywrightBrowser(checkout),
+    // The project's own production build has to hold before any of this is evidence, so it runs
+    // before the result exists rather than after it has already been written.
+    preconditions: [
+      {
+        label: "the project's own browser build",
+        command: { ...build, cwd: checkout },
+        timeoutMs: BUILD_MS,
+        logs: {
+          stdout: join(stagingRoot, "upstream-build.stdout.log"),
+          stderr: join(stagingRoot, "upstream-build.stderr.log"),
+        },
+      },
+    ],
+    update: async (page, signal) => {
+      // The project's own acceptance first: an update measured against a server the application
+      // never worked on would be measuring nothing.
+      await runUpstreamOrThrow(
+        {
+          label: "the project's own onboarding spec",
+          command: { ...upstreamE2eCommand(devOrigin(pinned), pinned), cwd: checkout },
+          timeoutMs: UPSTREAM_SPEC_MS,
+          logs: {
+            stdout: join(stagingRoot, "upstream-e2e.stdout.log"),
+            stderr: join(stagingRoot, "upstream-e2e.stderr.log"),
+          },
+        },
+        signal,
+      );
+      // Then one source edit, which the development server is expected to patch into the running
+      // document rather than replace it.
+      writeFileSync(
+        editPath,
+        original.replace(pinned.sentinelEdit.find, pinned.sentinelEdit.replace),
+      );
+      await waitForText(page, pinned.sentinelEdit.expectedText, signal);
+    },
+    restore: () => Promise.resolve(writeFileSync(editPath, original)),
+    timeouts: { installMs: INSTALL_MS, lifecycleMs: 1_800_000, browserMs: 600_000 },
+  });
 }
 
-function viteVersion(root: string): string {
-  const pkg = JSON.parse(readFileSync(join(root, "node_modules/vite/package.json"), "utf8")) as {
-    version: string;
-  };
-  return pkg.version;
-}
-
-function chromiumVersion(root: string): string {
+function viteVersion(): string {
   const pkg = JSON.parse(
-    readFileSync(join(root, "node_modules/playwright-core/package.json"), "utf8"),
+    readFileSync(join(checkout, "node_modules/vite/package.json"), "utf8"),
   ) as { version: string };
   return pkg.version;
 }
+
+const recorded: Record<string, Recording> = {};
+if (subjects === "both" || subjects === "rsvite") {
+  recorded["rsvite"] = await recordRsvite();
+}
+if (subjects === "both" || subjects === "vite") {
+  recorded["vite"] = await recordVite(pin, await prepareBrowser());
+}
+console.log(JSON.stringify(recorded, null, 2));

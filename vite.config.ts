@@ -47,6 +47,11 @@ export default defineConfig({
           "node --experimental-strip-types packages/compatibility-vite-upstream/scripts/record-vite-baseline.mts",
         env: ["VITE_CHECKOUT", "RUNNER_IMAGE"],
       },
+      "record:actual-budget:baseline": {
+        command:
+          "node --experimental-strip-types packages/compatibility-actual-budget/scripts/record-actual-budget-baseline.mts",
+        env: ["ACTUAL_BUDGET_CHECKOUT", "RUNNER_IMAGE", "RECORD_SUBJECTS"],
+      },
       ready: {
         command: "echo ready checks passed",
         dependsOn: [
