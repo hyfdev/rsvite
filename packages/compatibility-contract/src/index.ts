@@ -114,9 +114,11 @@ function findDuplicateCapabilityOwners(value: unknown): ContractViolation[] {
 }
 
 /**
- * A declared fallback and an all-Rust ownership record can each be well-formed while
- * contradicting each other. Whatever a fallback carried was executed by Vite's JavaScript
- * core, so that capability cannot also be reported as Rust-owned.
+ * A declared fallback and an ownership record can each be well-formed while contradicting
+ * each other. Whatever a fallback carried was executed by Vite's JavaScript core, so that
+ * capability must appear in the ownership record as `compatibility-javascript` — reporting it
+ * as Rust is a contradiction, and leaving it out of the record entirely is the same evasion
+ * without the contradiction being visible.
  */
 function findFallbackOwnershipConflicts(value: unknown): ContractViolation[] {
   const record = asRecord(value);
@@ -124,27 +126,35 @@ function findFallbackOwnershipConflicts(value: unknown): ContractViolation[] {
   const owners = record?.["capabilityOwners"];
   if (!Array.isArray(fallbacks) || !Array.isArray(owners)) return [];
 
-  const fallenBack = new Set<string>();
-  for (const fallback of fallbacks) {
-    const carried = asRecord(fallback)?.["capabilities"];
-    if (!Array.isArray(carried)) continue;
-    for (const capability of carried) {
-      if (typeof capability === "string") fallenBack.add(capability);
+  const ownerByCapability = new Map<string, unknown>();
+  for (const entry of owners) {
+    const owned = asRecord(entry);
+    const capability = owned?.["capability"];
+    if (typeof capability === "string" && !ownerByCapability.has(capability)) {
+      ownerByCapability.set(capability, owned?.["owner"]);
     }
   }
 
   const violations: ContractViolation[] = [];
-  for (const [index, entry] of owners.entries()) {
-    const owned = asRecord(entry);
-    const capability = owned?.["capability"];
-    if (typeof capability !== "string" || !fallenBack.has(capability)) continue;
-    if (owned?.["owner"] === "rust") {
-      violations.push(
-        violation(
-          `/capabilityOwners/${index}/owner`,
-          `claims Rust for a capability an explicit fallback carried (${capability})`,
-        ),
-      );
+  for (const [index, fallback] of fallbacks.entries()) {
+    const carried = asRecord(fallback)?.["capabilities"];
+    if (!Array.isArray(carried)) continue;
+    for (const [position, capability] of carried.entries()) {
+      if (typeof capability !== "string") continue;
+      const path = `/explicitFallbacks/${index}/capabilities/${position}`;
+      if (!ownerByCapability.has(capability)) {
+        violations.push(violation(path, `has no owner in /capabilityOwners (${capability})`));
+        continue;
+      }
+      const owner = ownerByCapability.get(capability);
+      if (owner !== "compatibility-javascript") {
+        violations.push(
+          violation(
+            path,
+            `was carried by a fallback, so it cannot be owned by ${String(owner)} (${capability})`,
+          ),
+        );
+      }
     }
   }
   return violations;

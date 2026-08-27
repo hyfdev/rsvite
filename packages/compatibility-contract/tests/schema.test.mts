@@ -63,7 +63,9 @@ const rejectedResults: Record<string, string> = {
   "failure-without-first-incompatible-behavior.json":
     "must have required property 'firstIncompatibleBehavior'",
   "fallback-capability-claimed-for-rust.json":
-    "claims Rust for a capability an explicit fallback carried",
+    "/explicitFallbacks/0/capabilities/0 was carried by a fallback, so it cannot be owned by rust",
+  "fallback-capability-without-owner.json":
+    "/explicitFallbacks/0/capabilities/0 has no owner in /capabilityOwners",
   "finished-before-started.json": "/finishedAt is earlier than /startedAt",
   "measurement-without-cache-state.json": "/measurements must have required property 'cacheState'",
   "missing-capability-owner.json": "must have required property 'capabilityOwners'",
@@ -189,6 +191,22 @@ test("pair validation reports a malformed document instead of its relationships"
     "missing-capability-owner.json",
     validators.validateResultAgainstManifest(manifest, malformed),
     "must have required property 'capabilityOwners'",
+  );
+});
+
+test("pair validation inherits the fallback ownership rule", () => {
+  const { manifest, result } = readPair("pair/fallback-capability-without-owner.json");
+
+  // The entry declares the capability, so nothing else can account for its absence: a
+  // fallback carried it, and the ownership record simply does not mention it.
+  assertAccepted(
+    "fallback-capability-without-owner.json manifest",
+    validators.validateCorpusManifest(manifest),
+  );
+  assertRejectedWith(
+    "fallback-capability-without-owner.json",
+    validators.validateResultAgainstManifest(manifest, result),
+    "/explicitFallbacks/0/capabilities/0 has no owner in /capabilityOwners",
   );
 });
 

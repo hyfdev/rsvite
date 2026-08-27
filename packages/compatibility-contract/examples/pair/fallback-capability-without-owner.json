@@ -32,7 +32,7 @@
           "type": "process-exit",
           "timeoutMs": 900000
         },
-        "expectedCapabilities": ["html"],
+        "expectedCapabilities": ["html", "resolution"],
         "javascriptApiLevel": "C0",
         "notes": "Illustrative entry. An input that only exercises HTML entry discovery and serving declares html alone, so an early result is not filed under a capability it never exercised."
       }
@@ -71,17 +71,13 @@
       {
         "capability": "html",
         "owner": "rust"
-      },
-      {
-        "capability": "modules-and-assets",
-        "owner": "compatibility-javascript"
       }
     ],
     "explicitFallbacks": [
       {
         "component": "vite-module-graph",
-        "capabilities": ["modules-and-assets"],
-        "reason": "Module resolution for this run used Vite's graph."
+        "capabilities": ["resolution"],
+        "reason": "Resolution for this run was handled by Vite's module graph."
       }
     ],
     "browserErrors": []

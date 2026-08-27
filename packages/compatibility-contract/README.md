@@ -56,9 +56,11 @@ Within one document:
   empty array asserts there were none.
 - A failing result that does not name the first incompatible behavior and classify the failure —
   and, symmetrically, a passing result that still carries those failure-only fields.
-- A result whose ownership contradicts its own fallbacks. Each fallback names the capabilities it
-  carried, and a capability a fallback carried cannot also be reported as Rust-owned: whatever fell
-  back was executed by Vite's JavaScript core.
+- A result whose ownership does not account for its own fallbacks. Each fallback names the
+  capabilities it carried, and every one of those must appear in the ownership record as
+  `compatibility-javascript`: whatever fell back was executed by Vite's JavaScript core. Reporting
+  such a capability as Rust-owned is rejected, and so is leaving it out of the ownership record —
+  omission would otherwise be the quieter way to make the same claim.
 - A baseline result filed as if it were rsvite. When the subject is `vite`, every owner must be
   `vite` and `explicitFallbacks` must be empty — the original implementation has nothing to fall
   back to.
