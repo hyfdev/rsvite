@@ -39,6 +39,9 @@ export default defineConfig({
       "check:test:vite-upstream": {
         command: "vp test --config packages/compatibility-vite-upstream/vite.config.ts",
       },
+      "check:test:actual-budget": {
+        command: "vp test --config packages/compatibility-actual-budget/vite.config.ts",
+      },
       "record:vite-upstream:baseline": {
         command:
           "node --experimental-strip-types packages/compatibility-vite-upstream/scripts/record-vite-baseline.mts",
@@ -53,6 +56,7 @@ export default defineConfig({
           "check:test:contract",
           "check:test:runner",
           "check:test:vite-upstream",
+          "check:test:actual-budget",
         ],
       },
     },
