@@ -1,0 +1,50 @@
+[warn] Unresolvable `optimizeDeps.include` entries:
+  [36mvue-virtual-scroller[39m
+
+Update your `nuxt.config.ts`:
+
+[90mexport default defineNuxtConfig({
+  vite: {
+    optimizeDeps: {
+      include: [
+        '@fnando/sparkline',
+        '@tiptap/core',
+        '@tiptap/extension-bold',
+        '@tiptap/extension-code',
+        '@tiptap/extension-code-block',
+        '@tiptap/extension-document',
+        '@tiptap/extension-hard-break',
+        '@tiptap/extension-history',
+        '@tiptap/extension-italic',
+        '@tiptap/extension-mention',
+        '@tiptap/extension-paragraph',
+        '@tiptap/extension-placeholder',
+        '@tiptap/extension-text',
+        '@tiptap/vue-3',
+        '@vueuse/gesture',
+        '@vueuse/integrations/useFocusTrap',
+        'blurhash',
+        'browser-fs-access',
+        'emoji-mart',
+        'file-saver',
+        'github-reserved-names',
+        'iso-639-1',
+        'prosemirror-highlight',
+        'prosemirror-highlight/shiki',
+        'prosemirror-state',
+        'slimeform',
+        'string-length',
+        'tippy.js',
+        'vue-advanced-cropper',
+        'workbox-cacheable-response',
+        'workbox-expiration',
+        'workbox-precaching',
+        'workbox-routing',
+        'workbox-strategies',
+        'workbox-window',
+      ]
+    }
+  }
+})
+
+[39mLearn more: https://vite.dev/guide/dep-pre-bundling.html

@@ -1,0 +1,97 @@
+[log] [90m│[39m
+[34m●[39m  [32mNuxt [1m4.4.7[22m[39m[90m (with [39m[90mNitro [1m2.13.4[22m[39m[90m, Vite [1m7.3.5[22m[39m[90m and Vue [1m3.5.30[22m[39m[90m)[39m
+[log] 
+[32m  ➜ Local:   [39m [36m[4mhttp://127.0.0.1:[1m37501[22m/[24m[39m
+[90m  ➜ Network:  use [37m--host[90m to expose[39m
+
+[log] [33m  ➜ DevTools: [39m[2mpress [22m[32mShift[39m[2m + [22m[32mAlt[39m[2m + [22m[32mD[39m[2m in the browser (v3.2.3)[22m
+
+[success] Vite client built in 133ms
+[success] Vite server built in 123ms
+[success] [nitro] Nuxt Nitro server built in 1742ms
+[info] Vite server warmed up in 1ms
+[info] Vite client warmed up in 2ms
+[log] [success] Vite server hmr 5 files in 2.125ms
+[info] Vite discovered new dependencies at runtime:
+  [36mfloating-vue[39m [90m← ./app/plugins/floating-vue.ts[39m
+  [36mpage-lifecycle/dist/lifecycle.mjs[39m [90m← ./app/plugins/page-lifecycle.client.ts[39m
+  [36mlru-cache[39m [90m← ./app/composables/cache.ts[39m
+  [36mfuse.js[39m [90m← ./app/composables/command.ts[39m
+  [36mmasto[39m [90m← ./app/composables/masto/masto.ts[39m
+  [36midb-keyval[39m [90m← ./app/utils/elk-idb.ts[39m
+  [90m./app/composables/content-parse.ts[39m
+    [36m@iconify/utils[39m
+    [36mtiny-decode[39m
+    [36multrahtml[39m
+  [90m./config/emojis.ts[39m
+    [36m@iconify-emoji/twemoji[39m
+    [36m@iconify/utils/lib/emoji/replace/find[39m
+  [36mnode-emoji[39m [90m← ./app/components/emoji/Emoji.vue[39m
+  [36mshiki[39m [90m← ./app/composables/shiki.ts[39m
+
+Pre-bundle them in your `nuxt.config.ts` to avoid page reloads:
+
+[90mexport default defineNuxtConfig({
+  vite: {
+    optimizeDeps: {
+      include: [
+        '@fnando/sparkline', // CJS
+        '@iconify-emoji/twemoji',
+        '@iconify/utils',
+        '@iconify/utils/lib/emoji/replace/find',
+        '@tiptap/core',
+        '@tiptap/extension-bold',
+        '@tiptap/extension-code',
+        '@tiptap/extension-code-block',
+        '@tiptap/extension-document',
+        '@tiptap/extension-hard-break',
+        '@tiptap/extension-history',
+        '@tiptap/extension-italic',
+        '@tiptap/extension-mention',
+        '@tiptap/extension-paragraph',
+        '@tiptap/extension-placeholder',
+        '@tiptap/extension-text',
+        '@tiptap/vue-3',
+        '@vueuse/gesture',
+        '@vueuse/integrations/useFocusTrap',
+        'blurhash',
+        'browser-fs-access',
+        'emoji-mart',
+        'file-saver', // CJS
+        'floating-vue',
+        'fuse.js',
+        'github-reserved-names', // CJS
+        'idb-keyval',
+        'iso-639-1', // CJS
+        'lru-cache',
+        'masto',
+        'node-emoji',
+        'page-lifecycle/dist/lifecycle.mjs',
+        'prosemirror-highlight',
+        'prosemirror-highlight/shiki',
+        'prosemirror-state',
+        'shiki',
+        'slimeform',
+        'string-length',
+        'tiny-decode',
+        'tippy.js',
+        'ultrahtml',
+        'vue-advanced-cropper',
+        'workbox-cacheable-response',
+        'workbox-expiration',
+        'workbox-precaching',
+        'workbox-routing',
+        'workbox-strategies',
+        'workbox-window',
+      ]
+    }
+  }
+})
+
+[39mLearn more: https://vite.dev/guide/dep-pre-bundling.html
+[log] [success] Vite server hmr 5 files in 0.603ms
+[info] New dependencies found: [36mvirtua/vue[39m, [36mpunycode/[39m
+[log] [success] Vite server hmr 5 files in 2.217ms
+[log] [success] Vite server hmr 5 files in 0.96ms
+[info] [32mhmr update [39m[2m/styles/global.css?direct, /styles/global.css[22m
+[info] [32mpage reload [39m[2mstyles/global.css[22m

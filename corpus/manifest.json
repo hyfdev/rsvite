@@ -129,6 +129,82 @@
           }
         }
       }
+    },
+    {
+      "id": "elk",
+      "kind": "real-project",
+      "source": {
+        "repository": "https://github.com/elk-zone/elk",
+        "commit": "ae4ebf3375eb68f1f355390b4f163adb10f5026c",
+        "license": {
+          "spdxId": "MIT",
+          "path": "LICENSE"
+        }
+      },
+      "lockfile": {
+        "path": "pnpm-lock.yaml",
+        "packageManager": {
+          "name": "pnpm",
+          "version": "11.6.0"
+        }
+      },
+      "commands": {
+        "install": {
+          "argv": ["pnpm", "install", "--frozen-lockfile"]
+        },
+        "dev": {
+          "argv": ["pnpm", "dev:mocked"]
+        },
+        "build": {
+          "argv": ["pnpm", "build"]
+        },
+        "preview": {
+          "argv": ["pnpm", "start"]
+        }
+      },
+      "readiness": {
+        "type": "stdout-pattern",
+        "pattern": "Local:",
+        "timeoutMs": 180000
+      },
+      "browserAcceptance": {
+        "entryPath": "/home",
+        "mainFrameNavigationIsFailure": true,
+        "hmr": {
+          "sentinelExpression": "globalThis.__rsviteElkHmrSentinel",
+          "sentinelStorage": "in-memory",
+          "edit": {
+            "path": "app/styles/global.css",
+            "find": "  font-size: var(--font-size, 15px);",
+            "replace": "  font-size: var(--font-size, 15px); /* rsvite-elk-hmr */"
+          },
+          "expectedText": "elkdev"
+        }
+      },
+      "expectedCapabilities": [
+        "html",
+        "modules-and-assets",
+        "resolution",
+        "errors",
+        "file-watching",
+        "hmr-without-full-reload",
+        "build-output",
+        "preview-output",
+        "ssr",
+        "framework-lifecycle"
+      ],
+      "javascriptApiLevel": "C3",
+      "notes": "Vue/Nuxt JavaScript API and framework-integration gate. ELK source stays external. Original commands: pnpm install --frozen-lockfile, pnpm dev:mocked, pnpm build, pnpm start. Nuxt uses programmatic Vite, vite:extendConfig, client/server resolve aliases, PWA, SSR, prerender, and Nitro packaging. Adapter: @rsvite/compatibility-elk.",
+      "extensions": {
+        "x-elk": {
+          "mockedDev": "dev:mocked",
+          "homePath": "/home",
+          "exploreHint": "explore",
+          "hmrStylesheet": "app/styles/global.css",
+          "nuxtHooks": ["vite:extendConfig", "nitro:config", "prepare:types"],
+          "buildOutputs": ["client", "ssr", "pwa", "prerender", "nitro"]
+        }
+      }
     }
   ]
 }

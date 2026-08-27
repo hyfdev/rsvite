@@ -1,0 +1,9 @@
+[2m$ nuxt build[22m
+[warn] [33m[plugin nuxt:module-preload-polyfill] Sourcemap is likely to be incorrect: a plugin (nuxt:module-preload-polyfill) was used to transform files, but didn't generate a sourcemap for the transformation. Consult the plugin documentation for help[39m
+[warn] [33m[plugin nuxtjs:i18n-function-injection] Sourcemap is likely to be incorrect: a plugin (nuxtjs:i18n-function-injection) was used to transform files, but didn't generate a sourcemap for the transformation. Consult the plugin documentation for help[39m
+[warn] [33m
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
+[warn] [33m[plugin nuxtjs:i18n-function-injection] Sourcemap is likely to be incorrect: a plugin (nuxtjs:i18n-function-injection) was used to transform files, but didn't generate a sourcemap for the transformation. Consult the plugin documentation for help[39m
