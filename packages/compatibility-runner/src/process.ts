@@ -27,9 +27,14 @@ export interface StartedCommand {
   /** Resolves once no process in the group is left, not merely once the leader closed. */
   stop(): Promise<CommandOutcome>;
   /**
-   * The leader was already gone when `stop` was called. Decided by asking the operating system,
-   * not by whether Node has delivered `close` yet: a process killed during acceptance is dead
-   * long before its event arrives, and treating that as "we stopped it" hides the failure.
+   * The command ended for a reason other than this runner asking it to.
+   *
+   * Decided after `stop` has run, because none of the easy signals is trustworthy on its own:
+   * Node's `close` event may not have been delivered while the host was busy, an exited process
+   * that has not been reaped still accepts signals, and a command whose own handler turns a
+   * termination into `process.exit(0)` leaves no signal on its outcome at all. The kernel's
+   * record of the process, read before anything is signalled, is what settles it; where that
+   * record is unavailable the remaining evidence is used and ambiguity is not read as consent.
    */
   exitedOnItsOwn(): boolean;
   /** The reason the command never started, if that is what happened. */

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1013,4 +1013,28 @@ test("an external termination is not hidden by a host that was too busy to notic
   assert.equal(result["outcome"], "fail", "an externally terminated server was recorded as a pass");
   assert.equal(failure.phase, "dev");
   assert.match(failure.message, /ended on its own/);
+});
+
+test("the result names evidence that has settled, not evidence still being written", async () => {
+  const request = await baseRequest("rsvite");
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: { commands: Record<string, { argv: string[] }> }[];
+  };
+  manifest.entries[0]!.commands["install"] = { argv: ["definitely-not-a-real-executable-xyz"] };
+
+  const report = await runCompatibilityCheck({ ...request, manifest });
+  // Snapshot the moment the call returns: nothing the runner owns may appear afterwards, or
+  // the result was assembled from a directory that was still being written into.
+  const atReturn = readdirSync(request.artifactRoot).sort();
+  await delay(500);
+  const later = readdirSync(request.artifactRoot).sort();
+
+  assert.deepEqual(later, atReturn, "a runner-owned file appeared after the result was returned");
+  const result = report.result as Record<string, unknown>;
+  const artifactPaths = result["artifactPaths"] as string[];
+  const failure = result["firstIncompatibleBehavior"] as { evidencePath: string };
+
+  assert.ok(artifactPaths.includes("install.stderr.log"), "the spawn error's log was not listed");
+  assert.equal(failure.evidencePath, "install.stderr.log");
+  assert.match(readFileSync(join(request.artifactRoot, failure.evidencePath), "utf8"), /ENOENT/);
 });
