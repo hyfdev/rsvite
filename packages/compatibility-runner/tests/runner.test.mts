@@ -158,7 +158,7 @@ test("a browser that cannot open the page fails the run", async () => {
   };
 
   assert.equal(failure.phase, "browser");
-  assert.match(failure.message, /could not open the page/);
+  assert.match(failure.message, /opening the page failed/);
 });
 
 test("browser errors are normalized onto the result", async () => {

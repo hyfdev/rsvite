@@ -19,6 +19,12 @@ export interface ReadinessOutcome {
 }
 
 const POLL_INTERVAL_MS = 100;
+/**
+ * A server can accept a connection and then never answer. Without a per-probe deadline the loop
+ * would sit inside one `fetch` and its own timeout could never take effect, so a hung server
+ * would be indistinguishable from a slow one — forever.
+ */
+const PROBE_TIMEOUT_MS = 1_000;
 
 /**
  * Waits for the signal the manifest declares. A command that dies while being waited on is
@@ -73,11 +79,15 @@ async function isReady(
   }
 
   try {
-    const response = await fetch(new URL(spec.urlPath, origin), { redirect: "manual" });
+    const response = await fetch(new URL(spec.urlPath, origin), {
+      redirect: "manual",
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
     // The body is never read, so the socket is released rather than held open.
     await response.body?.cancel();
     return response.status === (spec.expectStatus ?? 200);
   } catch {
+    // A refused connection, a reset, and a probe that ran out of time all mean "not ready yet".
     return false;
   }
 }

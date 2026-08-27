@@ -27,6 +27,15 @@ returns a raw result already accepted with its manifest by the contract's canoni
 `validateResultAgainstManifest`. A result the contract would reject is never returned: the runner
 throws instead, because an invalid document is worse than a missing run.
 
+The manifest is validated before anything is created or spawned. A malformed manifest describes
+commands nobody agreed to run, so it is refused while refusing it is still free.
+
+The accepted result is written to `result.json` inside `artifactRoot`, beside the logs it names.
+The contract reads evidence paths as relative to the result file, so the runner writes that file
+itself rather than leaving the base to a convention nobody recorded. Only logs that exist are
+listed, and an install failure points at install evidence rather than at a lifecycle log the run
+never created.
+
 ## What the runner decides, and what it refuses to
 
 It decides everything observable: whether a command failed, timed out or never became ready,
@@ -47,12 +56,27 @@ A timeout is reported on the result rather than thrown, because a subject that h
 
 Readiness follows the manifest: an HTTP probe, a stdout pattern, or the process exiting. A command
 that dies while being waited on is reported as having exited before readiness, so a crash is never
-filed as a slow start.
+filed as a slow start. Each HTTP probe carries its own deadline, because a server that accepts a
+connection and never answers would otherwise hold the probe past the readiness timeout it was
+supposed to enforce.
 
-Groups outlive their parent by design, which is what makes group cleanup work. A normal exit of the
-host still kills any group left running; a host killed by an unhandled signal never runs exit
-handlers at all, and installing signal handlers would change the semantics of whatever embeds this
-runner, so that case stays with the embedder.
+Stopping waits for the group to be gone, not for the leader to close. A descendant that ignores
+`SIGTERM`, or one that outlives a leader which exited on its own, is escalated to `SIGKILL` and
+waited for; the call does not return while any process of the group is alive.
+
+`lifecycleMs` bounds the lifecycle process from the moment it is spawned and covers readiness and
+the browser phase together, so a slow start cannot buy the browser more time than the caller
+allowed for the whole thing.
+
+Groups outlive their parent by design, which is what makes group cleanup work. Two cases are worth
+separating:
+
+- A normal exit of the host, including `process.exit`, still kills any group left running.
+- `SIGTERM` and `SIGINT` are catchable, but this runner deliberately does not catch them: exit
+  handlers do not run for an uncaught signal, so a group would survive. Installing handlers would
+  change the signal semantics of whatever embeds the runner, so the embedder keeps that policy —
+  and can stop a run through the runner's own API instead.
+- `SIGKILL` cannot be caught by anything, so no process can clean up after it.
 
 ## Browser adapters
 

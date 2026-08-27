@@ -9,19 +9,28 @@ export type BrowserEvent =
   | { readonly type: "request-failed"; readonly url: string; readonly message: string }
   | { readonly type: "main-frame-navigated"; readonly url: string };
 
+/**
+ * Every asynchronous entry point takes the runner's `AbortSignal` and must settle once it is
+ * aborted. Without that, a deadline could only stop the runner from waiting while the adapter
+ * kept driving a browser the run had already left behind.
+ */
 export interface BrowserPage {
   /**
    * Evaluates in the *current* document. A document that replaced another cannot see the
    * previous document's memory, which is what makes an in-memory sentinel meaningful.
    */
-  evaluate(expression: string): Promise<unknown>;
+  evaluate(expression: string, signal: AbortSignal): Promise<unknown>;
   /** Events observed since the last drain, in order. */
   drainEvents(): BrowserEvent[];
-  close(): Promise<void>;
+  close(signal: AbortSignal): Promise<void>;
 }
 
 export interface BrowserAdapter {
-  open(request: { readonly url: string; readonly timeoutMs: number }): Promise<BrowserPage>;
+  open(request: {
+    readonly url: string;
+    readonly timeoutMs: number;
+    readonly signal: AbortSignal;
+  }): Promise<BrowserPage>;
 }
 
 /** The browser-side facts a raw result records, normalized away from any adapter's shape. */

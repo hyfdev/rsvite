@@ -1,5 +1,14 @@
 import type { BrowserAdapter, BrowserEvent, BrowserPage } from "./browser.ts";
 
+/** Settles only when the runner gives up, which is what the adapter contract demands. */
+function hangs(signal: AbortSignal, what: string): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    signal.addEventListener("abort", () => reject(new Error(`${what} was aborted`)), {
+      once: true,
+    });
+  });
+}
+
 /**
  * An in-memory adapter used to exercise the orchestration without a real browser. It models the
  * one property that makes the sentinel rule work: a navigation installs a new document, and the
@@ -14,6 +23,11 @@ export interface SyntheticScript {
   readonly openEvents?: readonly BrowserEvent[];
   /** Fails `open`, standing in for a browser that could not reach the server. */
   readonly failToOpen?: string;
+  /**
+   * Never settles on its own, standing in for an adapter that hangs. It settles when the
+   * runner aborts, which is the behaviour the adapter contract requires.
+   */
+  readonly hangUntilAborted?: "open" | "evaluate";
 }
 
 export interface SyntheticPage extends BrowserPage {
@@ -35,13 +49,16 @@ export function createSyntheticBrowser(script: SyntheticScript = {}): BrowserAda
         return Promise.reject(new Error(script.failToOpen));
       }
 
+      if (script.hangUntilAborted === "open") return hangs(request.signal, "open");
+
       let memory: Record<string, unknown> = { ...script.documentMemory };
       let pending: BrowserEvent[] = [...(script.openEvents ?? [])];
       let closed = false;
 
       const page: SyntheticPage = {
-        evaluate(expression) {
+        evaluate(expression, signal) {
           if (closed) return Promise.reject(new Error("the page is closed"));
+          if (script.hangUntilAborted === "evaluate") return hangs(signal, "evaluate");
           // A real adapter would evaluate the expression; the synthetic one looks it up, which
           // is enough to model that a replaced document has forgotten what the old one held.
           return Promise.resolve(memory[expression]);

@@ -19,36 +19,58 @@ export interface CommandOutcome {
 }
 
 export interface StartedCommand {
-  /** Resolves when the process tree is gone, whether it exited or had to be killed. */
+  /** Resolves once no process in the group is left, not merely once the leader closed. */
   stop(): Promise<CommandOutcome>;
   /** Everything written so far, for readiness detection while the process runs. */
   readStdout(): string;
   readStderr(): string;
+  /** Resolves when the leader closes. The group may still hold descendants. */
   readonly exited: Promise<void>;
 }
 
 const TERMINATION_GRACE_MS = 2_000;
+const GROUP_POLL_INTERVAL_MS = 25;
+const GROUP_KILL_TIMEOUT_MS = 10_000;
 
 /**
- * Every started group is tracked so a normal exit cannot leave one behind. A group survives its
- * parent by design — that is what makes group cleanup possible — so if this process exits while
- * a command is still running, the group has to be killed here or it keeps the port.
- *
- * This covers a normal exit and `process.exit`. A host killed by an unhandled signal never runs
- * exit handlers, and installing signal handlers would change the semantics of whatever embeds
- * this runner, so that case stays the embedder's to handle.
+ * Group ids, not `ChildProcess` handles. The leader can exit while its descendants keep the
+ * group — and the port — alive, so nothing here may key cleanup on the leader's state.
  */
-const liveGroups = new Set<ChildProcess>();
+const liveGroups = new Set<number>();
 
 process.once("exit", () => {
-  for (const child of liveGroups) killGroup(child, "SIGKILL");
+  for (const pgid of liveGroups) signalGroup(pgid, "SIGKILL");
 });
+
+function signalGroup(pgid: number, signal: NodeJS.Signals | 0): boolean {
+  try {
+    process.kill(-pgid, signal);
+    return true;
+  } catch (error) {
+    // ESRCH means the group is gone, which is the state the caller wanted. EPERM means
+    // something in it still exists but is not ours to signal, so the group is not gone.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** True while any process still belongs to the group. */
+function groupExists(pgid: number): boolean {
+  return signalGroup(pgid, 0);
+}
+
+async function waitForGroupToDisappear(pgid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!groupExists(pgid)) return true;
+    await delay(GROUP_POLL_INTERVAL_MS);
+  }
+  return !groupExists(pgid);
+}
 
 /**
  * Long-running commands spawn their own children — a package manager wrapping a dev server
  * wrapping a bundler — and killing only the direct child orphans the rest, which then holds
- * the port the next run needs. Every command therefore leads its own process group and is
- * killed by group.
+ * the port the next run needs. Every command therefore leads its own process group.
  */
 function spawnGroup(command: CommandSpec): ChildProcess {
   const [file, ...args] = command.argv;
@@ -62,21 +84,30 @@ function spawnGroup(command: CommandSpec): ChildProcess {
   });
 }
 
-function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    process.kill(-child.pid, signal);
-  } catch {
-    // The group is already gone, which is the state this call wanted.
+/**
+ * Removes the whole group. The grace period is measured against the group disappearing, not
+ * against the leader closing: a descendant that ignores `SIGTERM`, or one that outlives a
+ * leader which exited on its own, must still be gone when this resolves.
+ */
+async function terminateGroup(pgid: number): Promise<void> {
+  if (!groupExists(pgid)) {
+    liveGroups.delete(pgid);
+    return;
   }
-}
 
-async function terminate(child: ChildProcess, exited: Promise<void>): Promise<void> {
-  killGroup(child, "SIGTERM");
-  const settled = await Promise.race([exited.then(() => true), delay(TERMINATION_GRACE_MS, false)]);
-  if (settled) return;
-  killGroup(child, "SIGKILL");
-  await exited;
+  signalGroup(pgid, "SIGTERM");
+  if (await waitForGroupToDisappear(pgid, TERMINATION_GRACE_MS)) {
+    liveGroups.delete(pgid);
+    return;
+  }
+
+  signalGroup(pgid, "SIGKILL");
+  const gone = await waitForGroupToDisappear(pgid, GROUP_KILL_TIMEOUT_MS);
+  if (gone) {
+    liveGroups.delete(pgid);
+    return;
+  }
+  throw new Error(`process group ${String(pgid)} survived SIGKILL`);
 }
 
 interface Capture {
@@ -111,7 +142,10 @@ export function startCommand(
   logPaths?: { stdout: string; stderr: string },
 ): StartedCommand {
   const child = spawnGroup(command);
-  liveGroups.add(child);
+  const pgid = child.pid;
+  if (pgid === undefined) throw new Error("the command did not start");
+  liveGroups.add(pgid);
+
   const buffers = capture(child, logPaths);
 
   let exitCode: number | null = null;
@@ -119,9 +153,9 @@ export function startCommand(
   const exited = once(child, "close").then(([code, closeSignal]) => {
     exitCode = code as number | null;
     signal = closeSignal as NodeJS.Signals | null;
-    liveGroups.delete(child);
+    // Deliberately not removing the group here: the leader closing says nothing about its
+    // descendants, and this set exists to make sure none of them is left behind.
   });
-  // The process may outlive the run and its exit is then expected, so nothing is left unhandled.
   exited.catch(() => undefined);
 
   return {
@@ -129,7 +163,7 @@ export function startCommand(
     readStderr: () => buffers.stderr,
     exited,
     async stop(): Promise<CommandOutcome> {
-      await terminate(child, exited);
+      await terminateGroup(pgid);
       return { exitCode, signal, timedOut: false, stdout: buffers.stdout, stderr: buffers.stderr };
     },
   };
@@ -137,7 +171,9 @@ export function startCommand(
 
 /**
  * Runs a command to completion. A timeout kills the process group and is reported rather than
- * thrown, because a run that timed out is evidence about the subject, not a runner error.
+ * thrown, because a run that timed out is evidence about the subject, not a runner error. The
+ * call does not return while any process of the group is still alive, even when the leader
+ * exited on its own.
  */
 export async function runCommand(
   command: CommandSpec,
