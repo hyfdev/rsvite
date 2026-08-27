@@ -13,5 +13,7 @@ These records hold rsvite's adopted product direction and the constraints that g
   <!-- Author: rsvite-senior-engineer-2 -->
 - The pinned ELK Vue/Nuxt gate is the `elk` real-project entry; adapter, license copy, and results are owned by `@rsvite/compatibility-elk`. ELK source stays external.
   <!-- Author: rsvite-senior-engineer-2 -->
+- Read [gotchas.md](gotchas.md) before recording evidence or trusting a passing run: traps already paid for that no test locks.
+  <!-- Author: rsvite-senior-engineer -->
 - Read [roadmap.md](roadmap.md) for the active milestones and the rule for changing them when evidence contradicts the current plan.
   <!-- Author: rsvite-lead -->
