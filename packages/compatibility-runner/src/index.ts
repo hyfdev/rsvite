@@ -235,13 +235,17 @@ export async function runCompatibilityCheck(request: RunRequest): Promise<RunRep
   }
 
   if (failure === undefined) {
-    // A command that ends by itself after reporting readiness has failed, whatever readiness
-    // the manifest declared. Only `process-exit` readiness expects the command to end at all,
-    // and even then a nonzero code is a failure.
+    // Only `process-exit` readiness defines the command ending as normal completion, and even
+    // then a nonzero code fails. Under HTTP or stdout readiness the command is supposed to keep
+    // serving through acceptance, so ending at all is a failure — a dev server that reports
+    // ready and then exits cleanly is not a server anything was measured against.
     const exitProblem =
-      entry.readiness.type === "process-exit" || exitedDuringAcceptance
+      entry.readiness.type === "process-exit"
         ? describeExit(lifecycleOutcome, request.lifecycle)
-        : undefined;
+        : exitedDuringAcceptance
+          ? (describeExit(lifecycleOutcome, request.lifecycle) ??
+            `${request.lifecycle} exited on its own after reporting readiness`)
+          : undefined;
     if (exitProblem !== undefined) failure = { phase: request.lifecycle, message: exitProblem };
   }
 

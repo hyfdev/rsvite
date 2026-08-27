@@ -512,3 +512,32 @@ test("the first incompatible behavior is the first one observed", async () => {
   // The console error happened on load; the navigation came later during the update.
   assert.match(failure.message, /console-error: first failure/);
 });
+
+test("a lifecycle process that exits cleanly after readiness is still a failure", async () => {
+  const port = await freePort();
+  const request = await baseRequest("rsvite", {
+    origin: `http://127.0.0.1:${String(port)}`,
+    browser: createSyntheticBrowser({ stepDelayMs: 150 }),
+    timeouts: { installMs: 10_000, lifecycleMs: 10_000, browserMs: 5_000 },
+  });
+  const manifest = structuredClone(syntheticManifest()) as {
+    entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
+  };
+  // Exit code 0 this time: under HTTP readiness the server was supposed to keep serving, so
+  // ending at all means acceptance was measured against something that was no longer there.
+  manifest.entries[0]!.commands["dev"] = {
+    argv: [process.execPath, fixture("flaky-server.mjs")],
+    env: { PORT: String(port), EXIT_AFTER_MS: "100", EXIT_CODE: "0" },
+  };
+
+  const report = await runCompatibilityCheck({ ...request, manifest });
+  const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as { message: string };
+
+  assert.equal(
+    result["outcome"],
+    "fail",
+    "a server that vanished mid-acceptance was recorded as usable",
+  );
+  assert.match(failure.message, /exited on its own after reporting readiness/);
+});
