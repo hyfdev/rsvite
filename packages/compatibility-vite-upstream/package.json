@@ -18,7 +18,8 @@
     "test": "vp test"
   },
   "dependencies": {
-    "@rsvite/compatibility-contract": "workspace:*"
+    "@rsvite/compatibility-contract": "workspace:*",
+    "@rsvite/compatibility-runner": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

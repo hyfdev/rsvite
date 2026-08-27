@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createContractValidators } from "@rsvite/compatibility-contract";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,7 @@ import {
   readCorpusManifest,
   readProvenance,
   validateCorpusManifestDocument,
+  viteBaselineResultPath,
   vitestTestNamePattern,
 } from "../src/index.ts";
 
@@ -191,4 +193,26 @@ test("Vitest 4.1.11 selects only the full test name when the corpus argv has no 
   assert.match(output, /1 passed/);
   assert.match(output, /1 skipped/);
   assert.equal(command[command.indexOf("--testNamePattern") + 1], vitestTestNamePattern(testName));
+});
+
+test("the committed Vite baseline is accepted with the corpus manifest", () => {
+  assert.equal(existsSync(viteBaselineResultPath), true, "the Vite baseline result is missing");
+  const result = JSON.parse(readFileSync(viteBaselineResultPath, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const check = createContractValidators().validateResultAgainstManifest(
+    readCorpusManifest(),
+    result,
+  );
+  assert.deepEqual(
+    check.valid ? [] : check.violations,
+    [],
+    check.valid ? "" : check.violations.map((v) => v.message).join("\n"),
+  );
+  assert.equal(result["outcome"], "pass");
+  assert.equal(asRecord(result["subject"])["name"], "vite");
+  assert.equal(asRecord(result["manifestEntry"])["id"], HTML_PRESERVE_COMMENTS_ENTRY_ID);
+  assert.equal(asRecord(result["manifestEntry"])["sourceCommit"], VITE_UPSTREAM_COMMIT);
+  assert.deepEqual(result["explicitFallbacks"], []);
 });

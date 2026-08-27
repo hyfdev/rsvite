@@ -281,6 +281,28 @@ importers:
       vite-plus:
         specifier: 'catalog:'
         version: 0.2.8(@types/node@22.20.0)(@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2))(typescript@7.0.2)
+
+  packages/compatibility-vite-upstream:
+    dependencies:
+      '@rsvite/compatibility-contract':
+        specifier: workspace:*
+        version: link:../compatibility-contract
+      '@rsvite/compatibility-runner':
+        specifier: workspace:*
+        version: link:../compatibility-runner
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.0
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite:
+        specifier: 'catalog:'
+        version: '@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2)'
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.2.8(@types/node@22.20.0)(@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2))(typescript@7.0.2)
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@22.20.0)(@vitest/browser-preview@4.1.10(@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2))(vitest@4.1.10))(@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2))

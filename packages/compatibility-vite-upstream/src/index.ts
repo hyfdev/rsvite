@@ -15,6 +15,11 @@ const repoRoot = join(packageDir, "../..");
 export const vendorRoot = join(repoRoot, "corpus/vite-upstream");
 export const corpusManifestPath = join(repoRoot, "corpus/manifest.json");
 export const provenancePath = join(packageDir, "provenance.json");
+export const viteBaselineDir = join(
+  repoRoot,
+  "corpus/results/vite-upstream-html-preserve-comments/vite",
+);
+export const viteBaselineResultPath = join(viteBaselineDir, "result.json");
 
 export interface ProvenanceFile {
   readonly source: string;

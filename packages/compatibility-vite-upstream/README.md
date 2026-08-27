@@ -14,3 +14,8 @@ manifest.
 
 `htmlPreserveCommentsAdapter` is that extension, read from the manifest. Paths are relative to
 `corpus/vite-upstream/`.
+
+The original Vite baseline for this entry is `corpus/results/vite-upstream-html-preserve-comments/vite/`,
+produced by `runCompatibilityCheck` against a checkout of the pinned commit. `vp run ready`
+re-validates that result with the corpus manifest. Regenerating it needs `VITE_CHECKOUT` pointing
+at that pin and `vp run record:vite-upstream:baseline`.
