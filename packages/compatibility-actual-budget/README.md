@@ -33,6 +33,12 @@ The recorder therefore parks the pinned revision on a branch whose upstream is t
 repository, which leaves the project's own `git pull` a no-op: the upstream command runs exactly
 as written and cannot change what it reads.
 
+Ignored files inside that checkout count as well. The translations repository ignores
+`source.json`, the application imports every `locale/*.json`, and the project's prune leaves
+ignored files alone — so a file git is told not to mention is still compiled into the bundle.
+Preparing the checkout clears them, and inspecting it reports anything the pinned tree does not
+contain, ignored or not.
+
 ## Recording
 
 ```sh

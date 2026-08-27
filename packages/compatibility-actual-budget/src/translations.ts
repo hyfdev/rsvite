@@ -51,11 +51,15 @@ export function inspectTranslations(root: string, pin: Pin = readPin()): Checkou
       detail: `the translations checkout is at ${head}, but the corpus pins ${pin.translations.commit}`,
     });
   }
-  const dirty = gitOutput(dir, ["status", "--porcelain", "--untracked-files=normal"]);
+  // Ignored files count. This repository ignores `source.json`, the application imports every
+  // `locale/*.json`, and the project's own prune leaves ignored files alone — so a file git is
+  // told not to mention is still compiled into the bundle. Anything here that the pinned tree
+  // does not contain is an undeclared build input.
+  const dirty = gitOutput(dir, ["status", "--porcelain", "--untracked-files=all", "--ignored"]);
   if (dirty !== "") {
     problems.push({
       kind: "modified",
-      detail: `the translations checkout has local changes: ${dirty.split("\n").slice(0, 3).join("; ")}`,
+      detail: `the translations checkout is not the pinned tree: ${dirty.split("\n").slice(0, 3).join("; ")}`,
     });
   }
   return problems;
@@ -120,9 +124,10 @@ export async function prepareTranslations(
     ]),
     signal,
   );
-  // Whatever the previous build left behind is not part of the pinned input.
+  // `-x` as well: without it an ignored file survives every clean, every prune and every
+  // ordinary status, and goes on being compiled into the bundle no run ever declared.
   await runUpstreamOrThrow(
-    step("clearing the translations checkout", dir, ["clean", "-fd"]),
+    step("clearing the translations checkout", dir, ["clean", "-fdx"]),
     signal,
   );
   for (const [key, value] of [

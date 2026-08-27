@@ -122,3 +122,38 @@ for (const step of ["newContext", "addInitScript", "newPage"] as const) {
     assert.equal(stub.closed(), 1, `the browser acquired before ${step} was left running`);
   });
 }
+
+test("a page the runner stopped waiting for is no longer being observed", async () => {
+  const stub = stubCheckout({ neverSettles: true });
+  const controller = new AbortController();
+
+  const open = opening(stub.root, controller.signal);
+  // Let the arrival wait take a few observations, so there is something to stop.
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  controller.abort(new Error("the runner gave up"));
+  await assert.rejects(open, /was aborted/);
+
+  // Rejecting the caller is not the same as stopping the work: the runner may not record a
+  // result while an operation it abandoned is still driving something.
+  const whenAbandoned = stub.page().observations();
+  await new Promise((resolve) => setTimeout(resolve, 600));
+
+  assert.equal(
+    stub.page().observations(),
+    whenAbandoned,
+    "the page was still being observed after the runner gave up",
+  );
+  assert.equal(stub.closed(), 1);
+});
+
+test("a wait the runner ended does not run on to its next observation", async () => {
+  const controller = new AbortController();
+  const still: Observable = { url: () => "http://localhost:3001/" };
+
+  // An interval far longer than any test would wait for: the only way this settles is if the
+  // wait itself ends when the run is abandoned, rather than sleeping through it.
+  const settling = settle(still, { intervalMs: 30_000, maxObservations: 5 }, controller.signal);
+  controller.abort(new Error("the runner gave up"));
+
+  await assert.rejects(settling, /abandoned/);
+});

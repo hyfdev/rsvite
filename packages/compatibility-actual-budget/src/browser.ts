@@ -89,7 +89,11 @@ export interface SettleLimits {
  * an application that was still moving, and every navigation it then made would be read as a
  * reload — a silent timeout is how that becomes indistinguishable from a real failure.
  */
-export async function settle(page: Observable, limits: SettleLimits = {}): Promise<void> {
+export async function settle(
+  page: Observable,
+  limits: SettleLimits = {},
+  signal?: AbortSignal,
+): Promise<void> {
   const quiet = limits.quietObservations ?? SETTLE_QUIET_OBSERVATIONS;
   const max = limits.maxObservations ?? SETTLE_MAX_OBSERVATIONS;
   const intervalMs = limits.intervalMs ?? OBSERVATION_INTERVAL_MS;
@@ -97,7 +101,12 @@ export async function settle(page: Observable, limits: SettleLimits = {}): Promi
   let seen = page.url();
   let unchanged = 0;
   for (let observation = 0; observation < max; observation += 1) {
-    if (intervalMs > 0) await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    // The runner may not record a result while work it abandoned is still driving something.
+    // Rejecting the wrapper around this loop settles the caller; it does not stop the loop, and
+    // a page that keeps being observed after the browser is gone is exactly that abandoned work.
+    if (isAborted(signal)) throw abandoned();
+    if (intervalMs > 0) await sleep(intervalMs, signal);
+    if (isAborted(signal)) throw abandoned();
     const now = page.url();
     if (now === seen) {
       unchanged += 1;
@@ -110,6 +119,32 @@ export async function settle(page: Observable, limits: SettleLimits = {}): Promi
   throw new Error(
     `the page was still moving after ${String(max)} observations; it never finished arriving`,
   );
+}
+
+/** Asked rather than narrowed: the answer changes while the loop is waiting. */
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+function abandoned(): Error {
+  return new Error("waiting for the page to settle was abandoned");
+}
+
+/** A wait the caller can end. An uncancellable timer keeps running long after nobody wants it. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted === true) {
+      resolve();
+      return;
+    }
+    const done = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
 }
 
 /**
@@ -230,7 +265,7 @@ export function createPlaywrightBrowser(checkoutRoot: string): BrowserAdapter {
           nothingToRelease,
         );
         await abortable(
-          settle(page),
+          settle(page, {}, request.signal),
           request.signal,
           "waiting for the page to settle",
           nothingToRelease,

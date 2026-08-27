@@ -23,7 +23,7 @@ export interface StubCheckout {
   closed(): number;
   contextStarted(): number;
   /** The page the stand-in last handed out, for driving events after arrival. */
-  page(): { navigate(to: string): void };
+  page(): { navigate(to: string): void; observations(): number };
 }
 
 /**
@@ -60,7 +60,7 @@ export function stubCheckout(options: StubOptions = {}): StubCheckout {
     page: () =>
       (
         createRequire(join(root, "package.json"))("playwright") as {
-          __lastPage(): { navigate(to: string): void };
+          __lastPage(): { navigate(to: string): void; observations(): number };
         }
       ).__lastPage(),
   };
@@ -108,6 +108,9 @@ export function pinnedCheckout(): {
   // A second input the build reads, living inside the checkout but outside its history.
   const localePath = "packages/desktop-client/locale";
   write(join(localePath, "en.json"), `{"welcome":"Welcome"}\n`);
+  // The real translations repository ignores `source.json`, while the application imports every
+  // JSON in this directory — so the fixture has to ignore something too.
+  write(join(localePath, ".gitignore"), "source.json\n");
   const locale = (...args: string[]): string =>
     execFileSync("git", ["-C", join(root, localePath), ...args], { encoding: "utf8" }).trim();
   locale("init", "--quiet");

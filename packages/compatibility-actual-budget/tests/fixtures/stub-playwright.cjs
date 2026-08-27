@@ -39,6 +39,7 @@ function createPage(options) {
       if (options.redirectOnArrival !== false) setTimeout(() => page.navigate("/bootstrap"), 0);
       return undefined;
     },
+    observations: () => observations,
     navigate(to) {
       path = to;
       handlers.get("framenavigated")?.(frame);

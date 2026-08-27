@@ -119,7 +119,7 @@
         "build-output"
       ],
       "javascriptApiLevel": "C1",
-      "notes": "Complex React monorepo gate. The adapter drives the project's own onboarding E2E spec and build without modifying its source or expectations.",
+      "notes": "Complex React monorepo gate. The adapter drives the project's own onboarding E2E spec and build, and changes none of its expectations. The HMR probe edits one source file and restores it after the run. Every fixed input is verified before and after each run, including the ignored translations checkout the production build compiles in.",
       "extensions": {
         "x-actual-budget": {
           "translations": {

@@ -143,7 +143,7 @@ export function actualBudgetEntry(pin: Pin = readPin()): Record<string, unknown>
     ],
     javascriptApiLevel: "C1",
     notes:
-      "Complex React monorepo gate. The adapter drives the project's own onboarding E2E spec and build without modifying its source or expectations.",
+      "Complex React monorepo gate. The adapter drives the project's own onboarding E2E spec and build, and changes none of its expectations. The HMR probe edits one source file and restores it after the run. Every fixed input is verified before and after each run, including the ignored translations checkout the production build compiles in.",
     // The production build compiles this second checkout into the bundle. It lives inside the
     // project but outside its git history, so the entry has to name it or the recorded commit
     // and lockfile do not determine what was built.
