@@ -1,0 +1,56 @@
+{
+  "contractVersion": 1,
+  "manifestEntry": {
+    "id": "elk",
+    "sourceCommit": "ae4ebf3375eb68f1f355390b4f163adb10f5026c"
+  },
+  "subject": {
+    "name": "vite",
+    "version": "nuxt-dev"
+  },
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "runnerImage": "local",
+    "nodeVersion": "24.20.0",
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.6.0"
+    },
+    "browser": {
+      "name": "chromium",
+      "version": "151.0.7922.34"
+    }
+  },
+  "command": {
+    "argv": ["pnpm", "build"],
+    "cwd": "/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7",
+    "exitCode": 0
+  },
+  "startedAt": "2026-08-27T14:18:40.289Z",
+  "finishedAt": "2026-08-27T14:19:17.871Z",
+  "outcome": "pass",
+  "javascriptApiLevel": "C3",
+  "capabilityOwners": [
+    {
+      "capability": "build-output",
+      "owner": "vite"
+    },
+    {
+      "capability": "ssr",
+      "owner": "vite"
+    },
+    {
+      "capability": "framework-lifecycle",
+      "owner": "vite"
+    }
+  ],
+  "explicitFallbacks": [],
+  "browserErrors": [],
+  "artifactPaths": [
+    "install.stdout.log",
+    "install.stderr.log",
+    "build.stdout.log",
+    "build.stderr.log"
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "contractVersion": 1,
+  "manifestEntry": {
+    "id": "elk",
+    "sourceCommit": "ae4ebf3375eb68f1f355390b4f163adb10f5026c"
+  },
+  "subject": {
+    "name": "rsvite",
+    "version": "workspace-unavailable"
+  },
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "runnerImage": "local",
+    "nodeVersion": "24.20.0",
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.6.0"
+    },
+    "browser": {
+      "name": "chromium",
+      "version": "151.0.7922.34"
+    }
+  },
+  "command": {
+    "argv": ["npx", "--no-install", "rsvite", ".", "--port", "42205"],
+    "cwd": "/root/Documents/github-opensource/.worktrees/elk-ae4ebf33-issue-7",
+    "exitCode": 1
+  },
+  "startedAt": "2026-08-27T14:19:18.693Z",
+  "finishedAt": "2026-08-27T14:19:22.018Z",
+  "outcome": "fail",
+  "javascriptApiLevel": "C0",
+  "capabilityOwners": [
+    {
+      "capability": "html",
+      "owner": "rust"
+    },
+    {
+      "capability": "modules-and-assets",
+      "owner": "rust"
+    },
+    {
+      "capability": "resolution",
+      "owner": "rust"
+    },
+    {
+      "capability": "errors",
+      "owner": "rust"
+    },
+    {
+      "capability": "file-watching",
+      "owner": "rust"
+    },
+    {
+      "capability": "hmr-without-full-reload",
+      "owner": "rust"
+    },
+    {
+      "capability": "ssr",
+      "owner": "rust"
+    },
+    {
+      "capability": "framework-lifecycle",
+      "owner": "rust"
+    }
+  ],
+  "explicitFallbacks": [],
+  "browserErrors": [],
+  "artifactPaths": ["install.stdout.log", "install.stderr.log", "dev.stdout.log", "dev.stderr.log"],
+  "firstIncompatibleBehavior": {
+    "phase": "dev",
+    "message": "the command exited before it reported readiness",
+    "evidencePath": "dev.stderr.log"
+  },
+  "failureClassification": {
+    "kind": "current-compatibility-requirement",
+    "evidence": "rsvite failed during dev before ELK could exercise the selected dev capabilities: the command exited before it reported readiness"
+  }
+}

@@ -42,6 +42,9 @@ export default defineConfig({
       "check:test:actual-budget": {
         command: "vp test --config packages/compatibility-actual-budget/vite.config.ts",
       },
+      "check:test:elk": {
+        command: "vp test --config packages/compatibility-elk/vite.config.ts",
+      },
       "record:vite-upstream:baseline": {
         command:
           "node --experimental-strip-types packages/compatibility-vite-upstream/scripts/record-vite-baseline.mts",
@@ -51,6 +54,11 @@ export default defineConfig({
         command:
           "node --experimental-strip-types packages/compatibility-actual-budget/scripts/record-actual-budget-baseline.mts",
         env: ["ACTUAL_BUDGET_CHECKOUT", "RUNNER_IMAGE", "RECORD_SUBJECTS"],
+      },
+      "record:elk:baseline": {
+        command:
+          "node --experimental-strip-types packages/compatibility-elk/scripts/record-elk-baseline.mts",
+        env: ["ELK_CHECKOUT", "RUNNER_IMAGE"],
       },
       ready: {
         command: "echo ready checks passed",
@@ -62,6 +70,7 @@ export default defineConfig({
           "check:test:runner",
           "check:test:vite-upstream",
           "check:test:actual-budget",
+          "check:test:elk",
         ],
       },
     },

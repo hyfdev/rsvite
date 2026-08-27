@@ -11,5 +11,7 @@ These records hold rsvite's adopted product direction and the constraints that g
   <!-- Author: rsvite-lead -->
 - The pinned Vite HTML E2E slice is under `corpus/vite-upstream/`; provenance and the `vite-upstream-e2e` manifest entry are owned by `@rsvite/compatibility-vite-upstream`.
   <!-- Author: rsvite-senior-engineer-2 -->
+- The pinned ELK Vue/Nuxt gate is the `elk` real-project entry; adapter, license copy, and results are owned by `@rsvite/compatibility-elk`. ELK source stays external.
+  <!-- Author: rsvite-senior-engineer-2 -->
 - Read [roadmap.md](roadmap.md) for the active milestones and the rule for changing them when evidence contradicts the current plan.
   <!-- Author: rsvite-lead -->
