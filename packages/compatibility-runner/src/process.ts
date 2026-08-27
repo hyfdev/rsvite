@@ -53,24 +53,21 @@ process.once("exit", () => {
   for (const pgid of liveGroups) signalGroup(pgid, "SIGKILL");
 });
 
+/** Signals this runner sent to a group, so an exit can be attributed to us or to something else. */
+const sentSignals = new Map<number, Set<NodeJS.Signals>>();
+
 function signalGroup(pgid: number, signal: NodeJS.Signals | 0): boolean {
+  if (signal !== 0) {
+    const sent = sentSignals.get(pgid) ?? new Set<NodeJS.Signals>();
+    sent.add(signal);
+    sentSignals.set(pgid, sent);
+  }
   try {
     process.kill(-pgid, signal);
     return true;
   } catch (error) {
     // ESRCH means the group is gone, which is the state the caller wanted. EPERM means
     // something in it still exists but is not ours to signal, so the group is not gone.
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-/** True while this exact process still exists, regardless of what Node has delivered. */
-function processExists(pid: number | undefined): boolean {
-  if (pid === undefined) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
@@ -223,12 +220,19 @@ export function startCommand(
     exited,
     exitedOnItsOwn: () => endedBeforeStop,
     async stop(): Promise<CommandOutcome> {
-      // Asked before anything is signalled, and of the operating system rather than of Node's
-      // event queue: `close` for a process that died during acceptance can arrive after this.
-      endedBeforeStop = closed || (pgid !== undefined && !processExists(child.pid));
+      // Whether the command was already over when the stop began. Asking the operating system
+      // whether the process still exists cannot answer this: a kill is asynchronous, so a
+      // doomed process still reports itself alive for a moment afterwards.
+      const alreadyClosed = closed;
       if (pgid !== undefined) await terminateGroup(pgid);
       // The leader's own outcome, not merely the group's absence.
       await exited;
+      // Attribution, not timing: the command ended on its own if it was already over, or if
+      // what ended it was a signal this runner never sent.
+      const ours =
+        pgid === undefined ? new Set<NodeJS.Signals>() : (sentSignals.get(pgid) ?? new Set());
+      endedBeforeStop = alreadyClosed || (signal !== null && !ours.has(signal));
+      if (pgid !== undefined) sentSignals.delete(pgid);
       return {
         exitCode,
         signal,

@@ -38,6 +38,15 @@ export interface RunFailure {
   readonly message: string;
 }
 
+interface ObservedFailure extends RunFailure {
+  /**
+   * The failure exists only because a budget expired. Such a failure is always later than
+   * whatever caused the budget to end, so it must not outrank an earlier cause — while a
+   * failure the page actually reported must not be overwritten by a later one.
+   */
+  readonly fromDeadline?: boolean;
+}
+
 /**
  * What the runner records but must not decide. Which capabilities a run set out to verify, which
  * implementation owns them, what fell back, and what a failure means are product judgments; the
@@ -267,7 +276,7 @@ export async function runCompatibilityCheck(request: RunRequest): Promise<RunRep
 
 interface Observed {
   readonly events: BrowserEvent[];
-  readonly failure?: RunFailure;
+  readonly failure?: ObservedFailure;
 }
 
 async function lifecyclePhase(
@@ -323,14 +332,18 @@ async function lifecyclePhase(
     acceptance.dispose();
   }
 
+  // The command's death outranks a browser failure that only exists because that death
+  // aborted the browser budget, and yields to one the page actually reported first.
   if (vanished && entry.readiness.type !== "process-exit") {
-    return {
-      events: observed.events,
-      failure: {
-        phase: request.lifecycle,
-        message: `${request.lifecycle} ended on its own during browser acceptance`,
-      },
-    };
+    if (observed.failure === undefined || observed.failure.fromDeadline === true) {
+      return {
+        events: observed.events,
+        failure: {
+          phase: request.lifecycle,
+          message: `${request.lifecycle} ended on its own during browser acceptance`,
+        },
+      };
+    }
   }
   if (observed.failure === undefined && lifecycleBound.expired()) {
     return {
@@ -400,7 +413,10 @@ async function observeBrowser(
     if (!opened.ok) {
       // The adapter may have obeyed the contract and produced the page just after the abort.
       if (opened.late !== undefined) await closeOrFail(opened.late);
-      return { events: [], failure: { phase: "browser", message: opened.reason } };
+      return {
+        events: [],
+        failure: { phase: "browser", message: opened.reason, fromDeadline: true },
+      };
     }
 
     const page = opened.value;
@@ -408,7 +424,11 @@ async function observeBrowser(
     try {
       const expression = acceptance.hmr?.sentinelExpression;
       const before = await readSentinel(page, expression, browserBound);
-      if (!before.ok) return { events, failure: { phase: "browser", message: before.reason } };
+      if (!before.ok)
+        return {
+          events,
+          failure: { phase: "browser", message: before.reason, fromDeadline: true },
+        };
       events.push(...page.drainEvents());
 
       // Checked here, before the update, so an error the page reported on load is the first
@@ -434,7 +454,11 @@ async function observeBrowser(
           "the update",
           CLEANUP_GRACE_MS,
         );
-        if (!updated.ok) return { events, failure: { phase: "browser", message: updated.reason } };
+        if (!updated.ok)
+          return {
+            events,
+            failure: { phase: "browser", message: updated.reason, fromDeadline: true },
+          };
 
         // Drained after every awaited page operation, the final sentinel read included: an
         // error the page reported while answering that last read used to stay in the adapter's
@@ -443,7 +467,11 @@ async function observeBrowser(
         const after = await readSentinel(page, expression, browserBound);
         windowEvents.push(...page.drainEvents());
         events.push(...windowEvents);
-        if (!after.ok) return { events, failure: { phase: "browser", message: after.reason } };
+        if (!after.ok)
+          return {
+            events,
+            failure: { phase: "browser", message: after.reason, fromDeadline: true },
+          };
 
         // One ordered stream decides which incompatibility came first. A navigation wins only
         // when it was observed before an error, and a lost sentinel is observed last of all,

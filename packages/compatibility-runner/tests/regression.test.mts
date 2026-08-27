@@ -544,32 +544,39 @@ test("a lifecycle process that exits cleanly after readiness is still a failure"
 
 test("a process killed during acceptance is not mistaken for one the runner stopped", async () => {
   const port = await freePort();
-  const browser = createSyntheticBrowser({
-    documentMemory: { "globalThis.__rsviteHmrSentinel": "session-1" },
-  });
-  const request = await baseRequest("rsvite", {
-    origin: `http://127.0.0.1:${String(port)}`,
-    browser,
-    // Kills the lifecycle process and returns at once, so its `close` event arrives while the
-    // runner is already stopping. Asking Node's event queue would call this "we stopped it".
-    update: () => {
-      const pid = Number(readFileSync(join(request.artifactRoot, "server.pid"), "utf8"));
-      process.kill(pid, "SIGKILL");
-      return Promise.resolve();
-    },
-  });
+  const request = await baseRequest("rsvite", { origin: `http://127.0.0.1:${String(port)}` });
+  const pidFile = join(request.artifactRoot, "server.pid");
   const manifest = structuredClone(syntheticManifest()) as {
     entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
   };
   manifest.entries[0]!.commands["dev"] = {
     argv: [process.execPath, fixture("serve.mjs")],
-    env: { PORT: String(port), PID_FILE: join(request.artifactRoot, "server.pid") },
+    env: { PORT: String(port), OWN_PID_FILE: pidFile },
   };
 
-  const report = await runCompatibilityCheck({ ...request, manifest });
+  const report = await runCompatibilityCheck({
+    ...request,
+    manifest,
+    // The browser phase only starts after readiness, so killing from `open` puts the death
+    // squarely inside acceptance. Its `close` event then arrives while the runner is already
+    // stopping, which is what used to make it look cooperative.
+    browser: {
+      open: async () => {
+        process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL");
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return {
+          evaluate: () => Promise.resolve(undefined),
+          drainEvents: () => [],
+          close: () => Promise.resolve(),
+        };
+      },
+    },
+  });
   const result = report.result as Record<string, unknown>;
+  const failure = result["firstIncompatibleBehavior"] as { message: string };
 
   assert.equal(result["outcome"], "fail", "a process killed mid-acceptance was recorded as a pass");
+  assert.match(failure.message, /ended on its own during browser acceptance/);
 });
 
 test("an early exit outranks a later browser failure", async () => {

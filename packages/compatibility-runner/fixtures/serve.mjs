@@ -7,6 +7,9 @@ import { writeFileSync } from "node:fs";
 
 const port = Number(process.env["PORT"] ?? 0);
 const childPidFile = process.env["CHILD_PID_FILE"];
+const ownPidFile = process.env["OWN_PID_FILE"];
+
+if (ownPidFile) writeFileSync(ownPidFile, String(process.pid));
 
 if (childPidFile) {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
