@@ -56,6 +56,14 @@ Focused fixtures and create-vite templates may isolate a failure or provide a fa
 
 ## Acceptance rules
 
+### Historical recordings and current-product replay
+
+A committed rsvite result and its logs describe the product source named by `subject.commit`; later product work does not rewrite those historical bytes merely to move that SHA forward. Daily validation reads the package name and version from that recorded commit, requires the SHA itself to identify the product source, and requires it to remain in the current product-source ancestry. It does not require the newest C0 product tree to be byte-identical to the recorded tree. The supported recorder continues to require a clean committed product tree and records its exact source when a new measurement is intentionally made.
+<!-- Author: rsvite-architect -->
+
+Currentness comes from replaying the unchanged input against the current product build. For the pinned HTML case, the live replay and committed artifact use the same whole-execution validator and must both fail only at the accepted C2 `transformIndexHtml` assertion. A product change is therefore allowed to preserve historical evidence when the exact behavior still reproduces; any different failure, extra failure, or unexpected pass makes the daily gate fail and requires an explicit compatibility decision rather than an automatic re-recording.
+<!-- Author: rsvite-architect -->
+
 ### HMR update ownership
 
 For a run that claims `hmr-without-full-reload`, the shared runner owns the manifest-declared `browserAcceptance.hmr.edit` and restores the original file before the run returns. The v1 manifest requires `edit` and `expectedText`. With no adapter override, the runner applies the declared find/replace and waits for `expectedText` to change from absent to present; it rejects a default check whose expected text was already present because that would not prove the edit reached the page.

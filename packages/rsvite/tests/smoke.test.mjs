@@ -10,6 +10,7 @@ import { expect, test } from "vite-plus/test";
 const packageRoot = dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const repositoryRoot = resolve(packageRoot, "../..");
 const pnpmBin = resolve(repositoryRoot, "node_modules/.bin/rsvite");
+const fixtureRoot = resolve(repositoryRoot, "fixtures/m1-basic-html");
 
 function waitForAddress(child) {
   return new Promise((resolveAddress, rejectAddress) => {
@@ -113,10 +114,7 @@ async function interruptOnFirstReadiness(root, signal) {
 for (const signal of ["SIGTERM", "SIGINT"]) {
   test(`the first readiness bytes already guarantee clean ${signal} shutdown`, async () => {
     const root = await mkdtemp(join(tmpdir(), "rsvite-m1-readiness-"));
-    await cp(
-      resolve(repositoryRoot, "fixtures/m1-basic-html/index.html"),
-      join(root, "index.html"),
-    );
+    await cp(resolve(fixtureRoot, "index.html"), join(root, "index.html"));
     try {
       for (let trial = 0; trial < 10; trial += 1) {
         await interruptOnFirstReadiness(root, signal);
@@ -127,9 +125,9 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
   }, 20_000);
 }
 
-test("pnpm's rsvite bin reaches Rust, reloads HTML, and shuts down cleanly", async () => {
+test("pnpm's rsvite bin executes Rust-resolved modules, reloads a dependency, and shuts down", async () => {
   const root = await mkdtemp(join(tmpdir(), "rsvite-m1-html-"));
-  await cp(resolve(repositoryRoot, "fixtures/m1-basic-html/index.html"), join(root, "index.html"));
+  await cp(fixtureRoot, root, { recursive: true });
   const child = spawn(pnpmBin, [root, "--port", "0"], {
     cwd: repositoryRoot,
     stdio: ["ignore", "pipe", "pipe"],
@@ -147,19 +145,36 @@ test("pnpm's rsvite bin reaches Rust, reloads HTML, and shuts down cleanly", asy
     });
     page.on("pageerror", (error) => errors.push(error.message));
 
+    const mainModuleResponse = page.waitForResponse(
+      (candidate) => new URL(candidate.url()).pathname === "/src/main.js",
+    );
+    const dependencyResponse = page.waitForResponse(
+      (candidate) => new URL(candidate.url()).pathname === "/src/message.js",
+    );
     const response = await page.goto(`${origin}/`);
+    const mainModule = await mainModuleResponse;
+    const dependency = await dependencyResponse;
     expect(response?.status()).toBe(200);
     expect(response?.headers()["content-type"]).toBe("text/html; charset=utf-8");
+    expect(mainModule.status()).toBe(200);
+    expect(mainModule.headers()["content-type"]).toBe("text/javascript; charset=utf-8");
+    expect(mainModule.headers()["cache-control"]).toBe("no-store");
+    const transformedMain = await mainModule.text();
+    expect(transformedMain).toContain('from "/src/message.js"');
+    expect(transformedMain).not.toContain('from "./message"');
+    expect(dependency.status()).toBe(200);
     await expect(page.title()).resolves.toBe("rsvite M1 HTML");
     await expect(page.textContent("#app")).resolves.toBe("served by Rust");
     expect(errors).toEqual([]);
 
-    const first = await readFile(join(root, "index.html"), "utf8");
-    await writeFile(
-      join(root, "index.html"),
-      first.replace("served by Rust", "served by Rust again"),
+    const messagePath = join(root, "src/message.js");
+    const first = await readFile(messagePath, "utf8");
+    await writeFile(messagePath, first.replace("served by Rust", "served by Rust again"));
+    const reloadedDependency = page.waitForResponse(
+      (candidate) => new URL(candidate.url()).pathname === "/src/message.js",
     );
     await page.reload();
+    expect((await reloadedDependency).status()).toBe(200);
     await expect(page.textContent("#app")).resolves.toBe("served by Rust again");
     expect(errors).toEqual([]);
 

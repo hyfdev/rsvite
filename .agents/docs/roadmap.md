@@ -22,6 +22,9 @@ Node/npm starts Rust through `napi-rs`. For a no-config, no-plugin fixture, Rust
 M1 leaf issues are created incrementally. The first architecture issue fixes the smallest vertical slice and internal boundaries; the first implementation issue then establishes the Node → `napi-rs` → Rust path. Later M1 issues depend on evidence from those changes and M0 rather than a speculative full decomposition.
 <!-- Author: rsvite-lead -->
 
+M1 serves browser JavaScript through Rust-owned static-import analysis, local `.js` resolution and rewrite, and a directed importer-to-importee graph. A full reload proves that dependency edits reach the browser. TypeScript, CSS, assets, packages, watching, automatic reload, and HMR remain later evidence-scoped leaves. Current-product replay validates the advancing product against the compatibility fact recorded by the committed C0 result.
+<!-- Author: rsvite-architect -->
+
 ## Later directions
 
 - Establish the C1 configuration bridge: Node loads Vite configuration and passes the supported values through `napi-rs`; the representation follows the first selected configuration behavior rather than a preselected serialization format.

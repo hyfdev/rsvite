@@ -8,7 +8,7 @@ use axum::{
     Router,
     body::Body,
     extract::State,
-    http::{HeaderValue, Method, StatusCode, header},
+    http::{HeaderValue, Method, StatusCode, Uri, header},
     response::Response,
     routing::any,
 };
@@ -17,6 +17,12 @@ use tokio::{
     net::TcpListener,
     sync::{oneshot, watch},
 };
+
+mod javascript;
+mod module_graph;
+
+use javascript::{ModuleErrorKind, load as load_javascript};
+use module_graph::ModuleGraph;
 
 #[derive(Debug, Error)]
 pub enum ServerError {
@@ -52,6 +58,22 @@ struct Inner {
     address: SocketAddr,
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
     lifecycle: watch::Receiver<LifecycleState>,
+    #[cfg(test)]
+    state: Arc<ServerState>,
+}
+
+struct ServerState {
+    root: PathBuf,
+    module_graph: Mutex<ModuleGraph>,
+}
+
+impl ServerState {
+    fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            module_graph: Mutex::new(ModuleGraph::default()),
+        }
+    }
 }
 
 pub struct DevServer {
@@ -83,11 +105,12 @@ impl DevServer {
         let address = listener
             .local_addr()
             .map_err(|source| ServerError::Bind { port, source })?;
-        let root = Arc::new(canonical_root);
+        let state = Arc::new(ServerState::new(canonical_root));
         // Axum's GET router also accepts HEAD, so the handler enforces the narrower contract.
         let router = Router::new()
-            .route("/", any(serve_root_request))
-            .with_state(Arc::clone(&root));
+            .route("/", any(serve_request))
+            .route("/{*path}", any(serve_request))
+            .with_state(Arc::clone(&state));
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let (task_lifecycle, lifecycle) = watch::channel(LifecycleState::Running);
@@ -111,6 +134,8 @@ impl DevServer {
                 address,
                 shutdown: Mutex::new(Some(shutdown_tx)),
                 lifecycle,
+                #[cfg(test)]
+                state,
             },
         })
     }
@@ -147,7 +172,11 @@ impl DevServer {
     }
 }
 
-async fn serve_root_request(method: Method, State(root): State<Arc<PathBuf>>) -> Response<Body> {
+async fn serve_request(
+    method: Method,
+    uri: Uri,
+    State(state): State<Arc<ServerState>>,
+) -> Response<Body> {
     if method != Method::GET {
         let mut response = response(StatusCode::METHOD_NOT_ALLOWED, None, Body::empty());
         response
@@ -156,6 +185,16 @@ async fn serve_root_request(method: Method, State(root): State<Arc<PathBuf>>) ->
         return response;
     }
 
+    if uri.path() == "/" {
+        return serve_root_html(&state.root).await;
+    }
+    if uri.path().ends_with(".js") {
+        return serve_javascript(&state, uri.path()).await;
+    }
+    response(StatusCode::NOT_FOUND, None, Body::empty())
+}
+
+async fn serve_root_html(root: &Path) -> Response<Body> {
     match tokio::fs::read(root.join("index.html")).await {
         Ok(html) => response(
             StatusCode::OK,
@@ -166,6 +205,45 @@ async fn serve_root_request(method: Method, State(root): State<Arc<PathBuf>>) ->
             response(StatusCode::NOT_FOUND, None, Body::empty())
         }
         Err(_) => response(StatusCode::INTERNAL_SERVER_ERROR, None, Body::empty()),
+    }
+}
+
+async fn serve_javascript(state: &ServerState, request_path: &str) -> Response<Body> {
+    match load_javascript(&state.root, request_path).await {
+        Ok(module) => {
+            state
+                .module_graph
+                .lock()
+                .expect("module graph mutex poisoned")
+                .replace_importees(module.path, module.importees);
+            let mut response = response(
+                StatusCode::OK,
+                Some("text/javascript; charset=utf-8"),
+                Body::from(module.source),
+            );
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
+        Err(error) => {
+            let status = match error.kind() {
+                ModuleErrorKind::BadRequest => StatusCode::BAD_REQUEST,
+                ModuleErrorKind::Forbidden => StatusCode::FORBIDDEN,
+                ModuleErrorKind::NotFound => StatusCode::NOT_FOUND,
+                ModuleErrorKind::UnsupportedMediaType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                ModuleErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            let mut response = response(
+                status,
+                Some("text/plain; charset=utf-8"),
+                Body::from(format!("rsvite: {error}\n")),
+            );
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
     }
 }
 
@@ -184,9 +262,10 @@ fn response(status: StatusCode, content_type: Option<&str>, body: Body) -> Respo
 #[cfg(test)]
 mod tests {
     use std::{
+        fs::{create_dir_all, write},
         net::{Ipv4Addr, SocketAddr},
-        path::Path,
-        sync::Mutex,
+        path::{Path, PathBuf},
+        sync::{Arc, Mutex},
         time::Duration,
     };
 
@@ -198,7 +277,7 @@ mod tests {
         time::timeout,
     };
 
-    use super::{DevServer, Inner, LifecycleState, ServerError};
+    use super::{DevServer, Inner, LifecycleState, ServerError, ServerState};
 
     async fn request(server: &DevServer, method: &str, path: &str) -> String {
         let mut stream = TcpStream::connect(server.address()).await.unwrap();
@@ -218,7 +297,30 @@ mod tests {
     }
 
     fn write_index(root: &Path, body: &str) {
-        std::fs::write(root.join("index.html"), body).unwrap();
+        write(root.join("index.html"), body).unwrap();
+    }
+
+    fn write_project_file(root: &Path, relative: &str, body: &str) {
+        let path = root.join(relative);
+        create_dir_all(path.parent().unwrap()).unwrap();
+        write(path, body).unwrap();
+    }
+
+    fn response_body(response: &str) -> &str {
+        response.split_once("\r\n\r\n").unwrap().1
+    }
+
+    fn empty_state() -> Arc<ServerState> {
+        Arc::new(ServerState::new(PathBuf::new()))
+    }
+
+    fn has_import_edge(server: &DevServer, importer: &str, importee: &str) -> bool {
+        let state = &server.inner.state;
+        state
+            .module_graph
+            .lock()
+            .expect("module graph mutex poisoned")
+            .contains_edge(&state.root.join(importer), &state.root.join(importee))
     }
 
     #[tokio::test]
@@ -235,6 +337,183 @@ mod tests {
         write_index(root.path(), "<h1>second</h1>");
         let second = request(&server, "GET", "/").await;
         assert!(second.ends_with("<h1>second</h1>"));
+
+        server.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rewrites_local_imports_rereads_modules_and_retains_graph_edges() {
+        let root = TempDir::new().unwrap();
+        write_index(
+            root.path(),
+            "<script type=\"module\" src=\"/src/main.js\"></script>",
+        );
+        write_project_file(
+            root.path(),
+            "src/main.js",
+            "const example = \"import './not-a-dependency'\";\n/* import './also-not-a-dependency' */\nimport { message } from './message';\nimport { suffix } from \"/src/suffix\";\ndocument.body.textContent = message + suffix + example.slice(0, 0);\n",
+        );
+        write_project_file(
+            root.path(),
+            "src/message.js",
+            "export const message = 'first';\n",
+        );
+        write_project_file(root.path(), "src/suffix.js", "export const suffix = '!';\n");
+        write_project_file(root.path(), "src/next.js", "export const next = 'next';\n");
+        write_project_file(
+            root.path(),
+            "src/nested/main.js",
+            "import { message } from '../message';\nvoid message;\n",
+        );
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+
+        let main = request(&server, "GET", "/src/main.js").await;
+        assert!(main.starts_with("HTTP/1.1 200 OK"), "{main}");
+        assert!(
+            main.contains("content-type: text/javascript; charset=utf-8"),
+            "{main}"
+        );
+        assert!(main.contains("cache-control: no-store"), "{main}");
+        assert!(response_body(&main).contains("from \"/src/message.js\""));
+        assert!(response_body(&main).contains("from \"/src/suffix.js\""));
+        assert!(has_import_edge(&server, "src/main.js", "src/message.js"));
+        assert!(has_import_edge(&server, "src/main.js", "src/suffix.js"));
+
+        let nested = request(&server, "GET", "/src/nested/main.js").await;
+        assert!(response_body(&nested).contains("from \"/src/message.js\""));
+        assert!(has_import_edge(
+            &server,
+            "src/nested/main.js",
+            "src/message.js"
+        ));
+
+        let first = request(&server, "GET", "/src/message.js").await;
+        assert!(response_body(&first).contains("'first'"));
+        write_project_file(
+            root.path(),
+            "src/message.js",
+            "export const message = 'second';\n",
+        );
+        let second = request(&server, "GET", "/src/message.js").await;
+        assert!(response_body(&second).contains("'second'"));
+
+        write_project_file(
+            root.path(),
+            "src/main.js",
+            "import { next } from './next';\ndocument.body.textContent = next;\n",
+        );
+        let updated = request(&server, "GET", "/src/main.js").await;
+        assert!(response_body(&updated).contains("from \"/src/next.js\""));
+        assert!(has_import_edge(&server, "src/main.js", "src/next.js"));
+        assert!(!has_import_edge(&server, "src/main.js", "src/message.js"));
+        assert!(!has_import_edge(&server, "src/main.js", "src/suffix.js"));
+
+        server.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rejects_unsupported_or_escaping_javascript_requests_without_a_fallback() {
+        let root = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        write_index(root.path(), "ok");
+        write_project_file(root.path(), "src/main.js", "export {};\n");
+        write_project_file(root.path(), "src/style.css", "body {}\n");
+        create_dir_all(root.path().join("src/directory")).unwrap();
+        write(
+            outside.path().join("outside.js"),
+            "export const outside = true;\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            outside.path().join("outside.js"),
+            root.path().join("src/escape.js"),
+        )
+        .unwrap();
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+
+        for (source, status, marker) in [
+            (
+                "import 'a-package';\n",
+                "HTTP/1.1 400",
+                "bare import \"a-package\" is not supported",
+            ),
+            (
+                "import 'https://example.com/module.js';\n",
+                "HTTP/1.1 400",
+                "URL import \"https://example.com/module.js\" is not supported",
+            ),
+            (
+                "import '../../outside';\n",
+                "HTTP/1.1 403",
+                "traverses outside the project root",
+            ),
+            (
+                "import './directory';\n",
+                "HTTP/1.1 400",
+                "directory import \"./directory\" is not supported",
+            ),
+            (
+                "import './style.css';\n",
+                "HTTP/1.1 415",
+                "unsupported import file type \"./style.css\"",
+            ),
+            (
+                "import './missing';\n",
+                "HTTP/1.1 404",
+                "import \"./missing\" was not found",
+            ),
+            (
+                "void import('./message.js');\n",
+                "HTTP/1.1 400",
+                "dynamic imports are not supported",
+            ),
+            (
+                "import {\n",
+                "HTTP/1.1 400",
+                "cannot analyze JavaScript module /src/main.js",
+            ),
+        ] {
+            write_project_file(root.path(), "src/main.js", source);
+            let response = request(&server, "GET", "/src/main.js").await;
+            assert!(response.starts_with(status), "{response}");
+            assert!(response.contains(marker), "{response}");
+        }
+
+        #[cfg(unix)]
+        {
+            write_project_file(root.path(), "src/main.js", "import './escape.js';\n");
+            let imported_escape = request(&server, "GET", "/src/main.js").await;
+            assert!(
+                imported_escape.starts_with("HTTP/1.1 403"),
+                "{imported_escape}"
+            );
+            assert!(
+                imported_escape.contains("escapes the project root"),
+                "{imported_escape}"
+            );
+
+            let requested_escape = request(&server, "GET", "/src/escape.js").await;
+            assert!(
+                requested_escape.starts_with("HTTP/1.1 403"),
+                "{requested_escape}"
+            );
+            assert!(
+                requested_escape.contains("request escapes the project root"),
+                "{requested_escape}"
+            );
+        }
+
+        let traversal = request(&server, "GET", "/src/%2e%2e/main.js").await;
+        assert!(traversal.starts_with("HTTP/1.1 400"), "{traversal}");
+        assert!(
+            traversal.contains("traversing JavaScript request path"),
+            "{traversal}"
+        );
+
+        let missing = request(&server, "GET", "/src/missing.js").await;
+        assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");
+        assert!(missing.contains("JavaScript module not found"), "{missing}");
 
         server.close().await.unwrap();
     }
@@ -316,6 +595,7 @@ mod tests {
                 address: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
                 shutdown: Mutex::new(Some(shutdown)),
                 lifecycle,
+                state: empty_state(),
             },
         };
 
@@ -336,6 +616,7 @@ mod tests {
                 address: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
                 shutdown: Mutex::new(Some(shutdown)),
                 lifecycle,
+                state: empty_state(),
             },
         };
 

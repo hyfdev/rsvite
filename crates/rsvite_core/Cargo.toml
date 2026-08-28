@@ -6,6 +6,10 @@ publish = false
 
 [dependencies]
 axum.workspace = true
+oxc_allocator.workspace = true
+oxc_parser.workspace = true
+oxc_span.workspace = true
+percent-encoding.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 
