@@ -54,6 +54,9 @@ export default defineConfig({
       "check:test:runner": {
         command: "vp test --config packages/compatibility-runner/vite.config.ts",
       },
+      "check:test:rsvite-workspace": {
+        command: "vp test --config packages/compatibility-rsvite-workspace/vite.config.ts",
+      },
       "check:test:vite-upstream": {
         command: "vp test --config packages/compatibility-vite-upstream/vite.config.ts",
       },
@@ -97,6 +100,7 @@ export default defineConfig({
           "check:test:rsvite:core",
           "check:test:rsvite:package",
           "check:test:rsvite:upstream",
+          "check:test:rsvite-workspace",
           "check:test:vite-upstream",
         ],
       },

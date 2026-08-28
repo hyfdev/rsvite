@@ -1,0 +1,26 @@
+{
+  "name": "@rsvite/compatibility-rsvite-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "How every compatibility recorder identifies and prepares this checkout's rsvite subject.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyfdev/rsvite.git",
+    "directory": "packages/compatibility-rsvite-workspace"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "check": "vp check",
+    "test": "vp test"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

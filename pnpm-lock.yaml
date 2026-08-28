@@ -297,6 +297,34 @@ importers:
         specifier: 'catalog:'
         version: 0.2.8(@types/node@22.20.0)(@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2))(typescript@7.0.2)
 
+  packages/compatibility-drawdb:
+    dependencies:
+      '@rsvite/compatibility-contract':
+        specifier: workspace:*
+        version: link:../compatibility-contract
+      '@rsvite/compatibility-runner':
+        specifier: workspace:*
+        version: link:../compatibility-runner
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.0
+      npm:
+        specifier: 'catalog:'
+        version: 11.19.0
+      playwright:
+        specifier: 'catalog:'
+        version: 1.62.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite:
+        specifier: 'catalog:'
+        version: '@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2)'
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.2.8(@types/node@22.20.0)(@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2))(typescript@7.0.2)
+
   packages/compatibility-elk:
     dependencies:
       '@rsvite/compatibility-contract':
@@ -322,24 +350,11 @@ importers:
         specifier: 'catalog:'
         version: 0.2.8(@types/node@22.20.0)(@voidzero-dev/vite-plus-core@0.2.8(@types/node@22.20.0)(typescript@7.0.2))(typescript@7.0.2)
 
-  packages/compatibility-drawdb:
-    dependencies:
-      '@rsvite/compatibility-contract':
-        specifier: workspace:*
-        version: link:../compatibility-contract
-      '@rsvite/compatibility-runner':
-        specifier: workspace:*
-        version: link:../compatibility-runner
+  packages/compatibility-rsvite-workspace:
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.0
-      npm:
-        specifier: 'catalog:'
-        version: 11.19.0
-      playwright:
-        specifier: 'catalog:'
-        version: 1.62.1
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -374,6 +389,9 @@ importers:
       '@rsvite/compatibility-contract':
         specifier: workspace:*
         version: link:../compatibility-contract
+      '@rsvite/compatibility-rsvite-workspace':
+        specifier: workspace:*
+        version: link:../compatibility-rsvite-workspace
       '@rsvite/compatibility-runner':
         specifier: workspace:*
         version: link:../compatibility-runner

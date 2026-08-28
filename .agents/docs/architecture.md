@@ -109,6 +109,17 @@ Reopen the private lifecycle shape if a repeatable Node worker, garbage-collecti
 Reopen the core/binding input boundary when the first accepted C1 configuration or plugin behavior cannot cross it while preserving call order, cancellation, errors, and Rust state ownership. Adding later M1 handlers, a module graph, watching, or HMR behind the same Rust owner does not reopen this decision.
 <!-- Author: rsvite-lead -->
 
+## How a recording identifies and prepares the rsvite subject
+
+The rsvite product source is exactly the Cargo workspace manifests and lockfile, `crates/rsvite_binding`, `crates/rsvite_core`, `packages/rsvite/package.json`, and `packages/rsvite/bin`. Root task orchestration, package tests, the compatibility adapters, and recorder dependencies are the environment a recording runs in, not the product it measures. Separating them is what lets a change to root `vite.config.ts` leave every committed result current, and what stops a topic commit outside those paths from becoming a result's `subject.commit`.
+<!-- Author: rsvite-senior-engineer -->
+
+`subject.commit` is the latest commit on `origin/main` that changed those paths. A recording additionally requires the same owner to be reachable from local history and the local paths to be clean and identical to it, so a stale branch, a branch that changed the product, or an uncommitted edit cannot be recorded as the subject. Protected `main` allows only squash merges, so a topic commit is not durable and must never be the recorded owner; a result stays current while only the environment moved, and goes stale when protected main owns different product source.
+<!-- Author: rsvite-senior-engineer -->
+
+Before a recorder touches an external checkout or writes evidence, it settles that identity, runs the repository's supported native build without cache, requires the build's JavaScript loader and platform binary, and resolves the command through this checkout's own `packages/rsvite` package. The order is the guarantee: a build never runs against a source nobody can name, a missing binary is reported as a build failure rather than an absent file, and a same-named executable on the host can never stand in for the subject. `@rsvite/compatibility-rsvite-workspace` owns this boundary for every recorder; the generic runner and the individual project adapters do not.
+<!-- Author: rsvite-senior-engineer -->
+
 ## Open architecture questions
 
 - How supported Vite configuration values cross the N-API boundary.

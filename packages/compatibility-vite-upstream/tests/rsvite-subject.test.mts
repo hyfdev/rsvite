@@ -4,12 +4,12 @@ import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vite-plus/test";
+import { assertRsviteResultSubjectIsCurrent } from "@rsvite/compatibility-rsvite-workspace";
 import { createContractValidators } from "@rsvite/compatibility-contract";
 import {
   HTML_PRESERVE_COMMENTS_ENTRY_ID,
   VITE_UPSTREAM_VITEST_VERSION,
   assertExpectedRsviteHtmlPreserveCommentsExecution,
-  assertRsviteWorkspaceSubjectMatches,
   assertResultArtifactsExist,
   assertViteUpstreamBrowserObservation,
   manifestForRsviteHtmlPreserveComments,
@@ -136,12 +136,9 @@ test("the paired recorder validates the workspace before preparation or evidence
     runTask: (task) => calls.push(task),
     recordRsvite: () => calls.push("record:rsvite"),
   });
-  assert.deepEqual(calls, [
-    "preflight",
-    "build:rsvite:native",
-    "record:vite-upstream:baseline",
-    "record:rsvite",
-  ]);
+  // The native build is part of preflight, not a separate step: identity, build and workspace
+  // command are settled together before anything external is touched or any evidence is written.
+  assert.deepEqual(calls, ["preflight", "record:vite-upstream:baseline", "record:rsvite"]);
 
   const effects: string[] = [];
   assert.throws(
@@ -254,7 +251,9 @@ test("the paired results describe the same pinned input and environment", () => 
   assert.equal((rsvite["subject"] as { name: string }).name, "rsvite");
   assert.equal((rsvite["subject"] as { version: string }).version, "0.0.0");
   assert.match((rsvite["subject"] as { commit: string }).commit, /^[0-9a-f]{40}$/);
-  assert.doesNotThrow(() => assertRsviteWorkspaceSubjectMatches(rsvite["subject"]));
+  assert.doesNotThrow(() => {
+    assertRsviteResultSubjectIsCurrent(rsvite["subject"]);
+  });
   assert.equal(rsvite["outcome"], "fail");
   assert.equal(rsvite["javascriptApiLevel"], "C0");
   assert.deepEqual(rsvite["capabilityOwners"], [{ capability: "html", owner: "rust" }]);

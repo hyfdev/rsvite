@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -25,18 +25,6 @@ export const VITE_UPSTREAM_BROWSER_OBSERVATION = "nested-vitest-browser-not-obse
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = join(srcDir, "..");
 const repoRoot = join(packageDir, "../..");
-const rsviteWorkspaceSourcePaths = [
-  "Cargo.lock",
-  "Cargo.toml",
-  "package.json",
-  "pnpm-lock.yaml",
-  "pnpm-workspace.yaml",
-  "vite.config.ts",
-  "crates/rsvite_binding",
-  "crates/rsvite_core",
-  "packages/rsvite",
-] as const;
-
 export const vendorRoot = join(repoRoot, "corpus/vite-upstream");
 export const corpusManifestPath = join(repoRoot, "corpus/manifest.json");
 export const provenancePath = join(packageDir, "provenance.json");
@@ -253,90 +241,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** A workspace result names committed product source, never an uncommitted local build. */
-export function readRsviteWorkspaceSubject(root = repoRoot): RsviteWorkspaceSubject {
-  const packagePath = join(root, "packages/rsvite/package.json");
-  let packageJson: unknown;
-  try {
-    packageJson = JSON.parse(readFileSync(packagePath, "utf8")) as unknown;
-  } catch (error) {
-    throw new Error(`cannot read rsvite workspace metadata at ${packagePath}: ${String(error)}`);
-  }
-
-  const record = asRecord(packageJson);
-  if (record?.["name"] !== "rsvite") {
-    throw new Error(`${packagePath} must declare package name rsvite`);
-  }
-  const version = record["version"];
-  if (typeof version !== "string" || version.length === 0) {
-    throw new Error(`${packagePath} must declare a non-empty string version`);
-  }
-
-  let status: string;
-  let commit: string;
-  try {
-    status = execFileSync(
-      "git",
-      ["status", "--porcelain=v1", "--untracked-files=all", "--", ...rsviteWorkspaceSourcePaths],
-      { cwd: root, encoding: "utf8" },
-    );
-    commit = execFileSync(
-      "git",
-      ["log", "-1", "--format=%H", "HEAD", "--", ...rsviteWorkspaceSourcePaths],
-      { cwd: root, encoding: "utf8" },
-    ).trim();
-  } catch (error) {
-    throw new Error(`cannot identify committed rsvite workspace source: ${String(error)}`);
-  }
-  if (status.trim().length > 0) {
-    throw new Error(
-      `rsvite workspace source must be committed before recording:\n${status.trim()}`,
-    );
-  }
-  if (!/^[0-9a-f]{40}$/.test(commit)) {
-    throw new Error(`rsvite workspace has no committed product source: ${commit}`);
-  }
-
-  return { name: "rsvite", version, commit };
-}
-
-/** A committed result remains current while only source outside the product build has changed. */
-export function assertRsviteWorkspaceSubjectMatches(subject: unknown, root = repoRoot): void {
-  const current = readRsviteWorkspaceSubject(root);
-  const recorded = asRecord(subject);
-  if (recorded?.["name"] !== current.name) {
-    throw new Error(`rsvite result subject name must be ${current.name}`);
-  }
-  if (recorded["version"] !== current.version) {
-    throw new Error(`rsvite result subject version must be ${current.version}`);
-  }
-  const commit = recorded["commit"];
-  if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) {
-    throw new Error("rsvite result subject commit must be a 40-character lowercase Git SHA");
-  }
-
-  const gitSucceeds = (args: string[]): boolean => {
-    const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
-    if (result.error !== undefined || result.status === null) {
-      throw new Error(`cannot inspect rsvite result source: ${String(result.error)}`);
-    }
-    return result.status === 0;
-  };
-
-  if (!gitSucceeds(["cat-file", "-e", `${commit}^{commit}`])) {
-    throw new Error(`rsvite result subject commit does not exist in this checkout: ${commit}`);
-  }
-  if (!gitSucceeds(["merge-base", "--is-ancestor", commit, current.commit])) {
-    throw new Error(
-      `rsvite result subject commit is not an ancestor of the current workspace: ${commit}`,
-    );
-  }
-  if (
-    !gitSucceeds(["diff", "--quiet", commit, current.commit, "--", ...rsviteWorkspaceSourcePaths])
-  ) {
-    throw new Error(`rsvite product source differs from recorded subject commit ${commit}`);
-  }
-}
-
 function posixRelative(from: string, to: string): string {
   return relative(from, to).split(sep).join("/");
 }

@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { readRsviteWorkspaceSubject } from "@rsvite/compatibility-rsvite-workspace";
 import { runCompatibilityCheck } from "@rsvite/compatibility-runner";
 import {
   HTML_PRESERVE_COMMENTS_ENTRY_ID,
@@ -11,7 +12,6 @@ import {
   htmlPreserveCommentsPackageManager,
   manifestForRsviteHtmlPreserveComments,
   publishViteUpstreamBrowserObservation,
-  readRsviteWorkspaceSubject,
   readViteChromiumVersion,
   rsviteBaselineDir,
   rsviteBaselineResultPath,

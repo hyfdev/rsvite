@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@rsvite/compatibility-contract": "workspace:*",
+    "@rsvite/compatibility-rsvite-workspace": "workspace:*",
     "@rsvite/compatibility-runner": "workspace:*"
   },
   "devDependencies": {

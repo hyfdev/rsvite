@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertLinuxX64Host, readRsviteWorkspaceSubject } from "../src/index.ts";
+import { prepareRsviteWorkspace } from "@rsvite/compatibility-rsvite-workspace";
+import { assertLinuxX64Host } from "../src/index.ts";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(scriptDir, "../../..");
@@ -14,8 +15,9 @@ interface PairRecorderSteps {
 }
 
 export function runRsvitePair(steps: PairRecorderSteps): void {
+  // Identity, native build and workspace command first: nothing external is touched and no
+  // evidence is written until this checkout can name and produce the subject it measures.
   steps.preflight();
-  steps.runTask("build:rsvite:native");
   steps.runTask("record:vite-upstream:baseline");
   steps.recordRsvite();
 }
@@ -38,7 +40,7 @@ function main(): void {
   runRsvitePair({
     preflight: () => {
       assertLinuxX64Host();
-      readRsviteWorkspaceSubject();
+      prepareRsviteWorkspace(repositoryRoot);
     },
     runTask: (task) => {
       execFileSync(vp, ["run", "--no-cache", task], {
