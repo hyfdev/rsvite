@@ -1,6 +1,5 @@
 use std::{
     collections::BTreeSet,
-    fmt,
     path::{Path, PathBuf},
 };
 
@@ -11,47 +10,21 @@ use oxc_ast::ast::{
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
 use oxc_span::{ContentEq, SourceType, Span};
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+
+use crate::project_file::{
+    ProjectFileError as ModuleError, ProjectFileErrorKind as ModuleErrorKind, canonicalize_file,
+    decode_path, has_extension, resolve_request_file,
+};
+
+/// The file kinds a module request or import may resolve to.
+const MODULE_EXTENSIONS: &[&str] = &["js", "ts"];
 
 const MODULE_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
     .remove(b'.')
     .remove(b'_')
     .remove(b'~');
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ModuleErrorKind {
-    BadRequest,
-    Forbidden,
-    NotFound,
-    UnsupportedMediaType,
-    Internal,
-}
-
-#[derive(Debug)]
-pub(crate) struct ModuleError {
-    kind: ModuleErrorKind,
-    message: String,
-}
-
-impl ModuleError {
-    fn new(kind: ModuleErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-        }
-    }
-
-    pub(crate) fn kind(&self) -> ModuleErrorKind {
-        self.kind
-    }
-}
-
-impl fmt::Display for ModuleError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
 
 pub(crate) struct LoadedJavaScript {
     pub(crate) path: PathBuf,
@@ -312,30 +285,7 @@ fn source_type(path: &Path) -> SourceType {
 }
 
 async fn resolve_request_path(root: &Path, request_path: &str) -> Result<PathBuf, ModuleError> {
-    let decoded = decode_path(request_path, "request path")?;
-    let relative = decoded.strip_prefix('/').ok_or_else(|| {
-        ModuleError::new(
-            ModuleErrorKind::BadRequest,
-            format!("module request path must be root-relative: {request_path}"),
-        )
-    })?;
-    let candidate = append_request_segments(root, relative, request_path)?;
-    if !has_supported_extension(&candidate) {
-        return Err(ModuleError::new(
-            ModuleErrorKind::UnsupportedMediaType,
-            format!("unsupported module request file type: {request_path}"),
-        ));
-    }
-
-    let canonical = canonicalize_file(
-        root,
-        &candidate,
-        format!("module not found: {request_path}"),
-        format!("module request escapes the project root: {request_path}"),
-    )
-    .await?;
-    ensure_supported_module_file(&canonical, request_path)?;
-    Ok(canonical)
+    resolve_request_file(root, request_path, MODULE_EXTENSIONS, "module").await
 }
 
 async fn resolve_import(
@@ -394,11 +344,19 @@ async fn resolve_import(
     let canonical = canonicalize_file(
         root,
         &candidate,
+        // Every failure to canonicalize a file in the module graph reports the same noun,
+        // whether the request named it directly or an import did.
+        "module",
         format!("import {specifier:?} was not found from {importer_url}"),
         format!("import {specifier:?} escapes the project root from {importer_url}"),
     )
     .await?;
-    ensure_supported_module_file(&canonical, specifier)?;
+    if !has_extension(&canonical, MODULE_EXTENSIONS) {
+        return Err(ModuleError::new(
+            ModuleErrorKind::UnsupportedMediaType,
+            format!("resolved module has an unsupported file type: {specifier}"),
+        ));
+    }
     let url = module_url(root, &canonical)?;
     Ok(ResolvedImport {
         path: canonical,
@@ -456,42 +414,6 @@ async fn resolve_extensionless_import(
     ))
 }
 
-fn decode_path(path: &str, label: &str) -> Result<String, ModuleError> {
-    percent_decode_str(path)
-        .decode_utf8()
-        .map(|decoded| decoded.into_owned())
-        .map_err(|_| {
-            ModuleError::new(
-                ModuleErrorKind::BadRequest,
-                format!("{label} is not valid UTF-8: {path:?}"),
-            )
-        })
-}
-
-fn append_request_segments(
-    root: &Path,
-    relative: &str,
-    request_path: &str,
-) -> Result<PathBuf, ModuleError> {
-    let mut candidate = root.to_path_buf();
-    for segment in relative.split('/') {
-        if segment.is_empty() || segment == "." || segment == ".." || segment.contains('\\') {
-            return Err(ModuleError::new(
-                ModuleErrorKind::BadRequest,
-                format!("invalid or traversing module request path: {request_path}"),
-            ));
-        }
-        if segment.contains('\0') {
-            return Err(ModuleError::new(
-                ModuleErrorKind::BadRequest,
-                format!("module request path contains a NUL byte: {request_path}"),
-            ));
-        }
-        candidate.push(segment);
-    }
-    Ok(candidate)
-}
-
 fn append_import_segments(
     root: &Path,
     base: &Path,
@@ -536,57 +458,6 @@ fn append_import_segments(
         ));
     }
     Ok(candidate)
-}
-
-async fn canonicalize_file(
-    root: &Path,
-    candidate: &Path,
-    missing_message: String,
-    escape_message: String,
-) -> Result<PathBuf, ModuleError> {
-    let canonical = tokio::fs::canonicalize(candidate).await.map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            ModuleError::new(ModuleErrorKind::NotFound, missing_message)
-        } else {
-            ModuleError::new(
-                ModuleErrorKind::Internal,
-                format!("failed to resolve module file: {error}"),
-            )
-        }
-    })?;
-    if !canonical.starts_with(root) {
-        return Err(ModuleError::new(ModuleErrorKind::Forbidden, escape_message));
-    }
-    let metadata = tokio::fs::metadata(&canonical).await.map_err(|error| {
-        ModuleError::new(
-            ModuleErrorKind::Internal,
-            format!("failed to inspect resolved module file: {error}"),
-        )
-    })?;
-    if !metadata.is_file() {
-        return Err(ModuleError::new(
-            ModuleErrorKind::BadRequest,
-            "resolved module is a directory or non-file",
-        ));
-    }
-    Ok(canonical)
-}
-
-fn ensure_supported_module_file(path: &Path, requested: &str) -> Result<(), ModuleError> {
-    if has_supported_extension(path) {
-        return Ok(());
-    }
-    Err(ModuleError::new(
-        ModuleErrorKind::UnsupportedMediaType,
-        format!("resolved module has an unsupported file type: {requested}"),
-    ))
-}
-
-fn has_supported_extension(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|extension| extension.to_str()),
-        Some("js" | "ts")
-    )
 }
 
 fn module_url(root: &Path, path: &Path) -> Result<String, ModuleError> {

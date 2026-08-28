@@ -1,0 +1,9 @@
+/* The asset URL is relative: the browser resolves it against this stylesheet, and rsvite answers
+   the request it produces. Nothing here is parsed or rewritten by the server. */
+#app {
+  color: rgb(16, 94, 160);
+  background-image: url("../assets/mark.svg");
+  background-repeat: no-repeat;
+  background-size: 24px 24px;
+  padding-left: 32px;
+}
