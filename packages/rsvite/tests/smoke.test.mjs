@@ -12,6 +12,7 @@ const repositoryRoot = resolve(packageRoot, "../..");
 const pnpmBin = resolve(repositoryRoot, "node_modules/.bin/rsvite");
 const htmlFixtureRoot = resolve(repositoryRoot, "fixtures/m1-basic-html");
 const typescriptFixtureRoot = resolve(repositoryRoot, "fixtures/m1-basic-typescript");
+const cssAssetFixtureRoot = resolve(repositoryRoot, "fixtures/m1-basic-css-assets");
 
 function waitForAddress(child) {
   return new Promise((resolveAddress, rejectAddress) => {
@@ -251,4 +252,83 @@ const target: Element | null = document.querySelector("#app");
 if (target !== null) target.textContent = new Value().text;
 `,
   });
+});
+
+test("pnpm's rsvite bin serves the stylesheet and the asset it names, and rereads both", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rsvite-m1-resources-"));
+  await cp(cssAssetFixtureRoot, root, { recursive: true });
+  const child = spawn(pnpmBin, [root, "--port", "0"], {
+    cwd: repositoryRoot,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const exit = waitForExit(child);
+  let browser;
+
+  try {
+    const { origin, port } = await waitForAddress(child);
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    const errors = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("requestfailed", (request) => {
+      errors.push(`${request.url()} ${request.failure()?.errorText ?? "failed"}`);
+    });
+
+    const stylesheetResponse = page.waitForResponse(
+      (candidate) => new URL(candidate.url()).pathname === "/src/styles.css",
+    );
+    // The browser produces this request by resolving the stylesheet's own relative URL; the
+    // server never parsed the CSS.
+    const assetResponse = page.waitForResponse(
+      (candidate) => new URL(candidate.url()).pathname === "/assets/mark.svg",
+    );
+    await page.goto(`${origin}/`);
+    const stylesheet = await stylesheetResponse;
+    const asset = await assetResponse;
+
+    expect(stylesheet.status()).toBe(200);
+    expect(stylesheet.headers()["content-type"]).toBe("text/css; charset=utf-8");
+    expect(stylesheet.headers()["cache-control"]).toBe("no-store");
+    expect(asset.status()).toBe(200);
+    expect(asset.headers()["content-type"]).toBe("image/svg+xml");
+    expect(asset.headers()["cache-control"]).toBe("no-store");
+    expect(await asset.text()).toContain("<circle");
+
+    const colour = () =>
+      page.evaluate(() => getComputedStyle(document.querySelector("#app")).color);
+    await expect(colour()).resolves.toBe("rgb(16, 94, 160)");
+    expect(errors).toEqual([]);
+
+    // Edit both, then a full reload: no restart, and the new bytes are what the page gets.
+    const stylesheetFile = join(root, "src/styles.css");
+    await writeFile(
+      stylesheetFile,
+      (await readFile(stylesheetFile, "utf8")).replace("rgb(16, 94, 160)", "rgb(3, 122, 51)"),
+    );
+    const assetFile = join(root, "assets/mark.svg");
+    await writeFile(assetFile, (await readFile(assetFile, "utf8")).replace("circle", "ellipse"));
+
+    const reloadedAsset = page.waitForResponse(
+      (candidate) => new URL(candidate.url()).pathname === "/assets/mark.svg",
+    );
+    await page.reload();
+    expect(await (await reloadedAsset).text()).toContain("<ellipse");
+    await expect(colour()).resolves.toBe("rgb(3, 122, 51)");
+    expect(errors).toEqual([]);
+
+    child.kill("SIGTERM");
+    await expect(exit).resolves.toEqual({ code: 0, signal: null });
+    await provePortCanRebind(port);
+  } finally {
+    try {
+      await browser?.close();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await exit.catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  }
 });
