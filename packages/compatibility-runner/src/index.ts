@@ -9,11 +9,20 @@ import {
   type BrowserPage,
 } from "./browser.ts";
 import { deadline, runUnder, type Bounded, type Deadline } from "./deadline.ts";
+import {
+  createHmrUpdate,
+  pageHasExpectedText,
+  runDefaultHmrUpdate,
+  type HmrAcceptance,
+  type HmrUpdate,
+  type PreparedHmrUpdate,
+} from "./hmr.ts";
 import { runCommand, startCommand, type CommandSpec, type CommandOutcome } from "./process.ts";
 import { waitForReadiness, type ReadinessSpec } from "./readiness.ts";
 
 export * from "./browser.ts";
 export { AbandonedWorkError, type Bounded, type Deadline } from "./deadline.ts";
+export { type HmrUpdate } from "./hmr.ts";
 export * from "./process.ts";
 export * from "./readiness.ts";
 export {
@@ -85,10 +94,12 @@ export interface RunRequest {
   readonly declared: DeclaredRunInputs;
   readonly browser?: BrowserAdapter;
   /**
-   * The adapter's update window: whatever it does here (edit a file, wait for text) happens
-   * between the two sentinel reads. It reports; the runner judges.
+   * Overrides the runner's default manifest-declared HMR edit and expected-text wait. A run that
+   * claims HMR must call `hmr.apply()` from its override; the runner restores the edit after the
+   * update window on every exit path. The override reports project-specific facts; the runner
+   * judges navigation, errors, and sentinel survival.
    */
-  readonly update?: (page: BrowserPage, signal: AbortSignal) => Promise<void>;
+  readonly update?: (page: BrowserPage, signal: AbortSignal, hmr: HmrUpdate) => Promise<void>;
   readonly timeouts: {
     readonly installMs: number;
     readonly lifecycleMs: number;
@@ -125,7 +136,7 @@ interface ManifestEntry {
   readonly readiness: ReadinessSpec;
   readonly browserAcceptance?: {
     readonly entryPath: string;
-    readonly hmr?: { readonly sentinelExpression: string };
+    readonly hmr?: HmrAcceptance;
   };
 }
 
@@ -366,7 +377,8 @@ async function lifecyclePhase(
 /**
  * A run that claims HMR has to have looked. Skipping the browser, or reading a sentinel the page
  * never set, produces the same "no navigation, nothing changed" shape as a genuine pass, so the
- * inputs that make the claim checkable are required before the claim is allowed.
+ * inputs that make the claim checkable are required before the claim is allowed. The update
+ * itself comes from the manifest unless an adapter overrides it.
  */
 function missingHmrEvidence(request: RunRequest, entry: ManifestEntry): string | undefined {
   const claimsHmr = request.declared.capabilityOwners.some(
@@ -380,9 +392,6 @@ function missingHmrEvidence(request: RunRequest, entry: ManifestEntry): string |
     return `the run claims ${HMR_CAPABILITY} but no origin was given`;
   if (entry.browserAcceptance?.hmr === undefined) {
     return `the run claims ${HMR_CAPABILITY} but the manifest entry declares no HMR acceptance`;
-  }
-  if (request.update === undefined) {
-    return `the run claims ${HMR_CAPABILITY} but no update was performed`;
   }
   return undefined;
 }
@@ -408,6 +417,7 @@ async function observeBrowser(
     lifecycleBound.signal,
   );
   const url = new URL(acceptance.entryPath, request.origin).toString();
+  let hmrUpdate: PreparedHmrUpdate | undefined;
 
   try {
     const opened = await runUnder(
@@ -445,14 +455,92 @@ async function observeBrowser(
         };
       }
 
-      if (request.update !== undefined) {
-        const update = request.update;
-        const updated = await runUnder(
-          (signal) => update(page, signal),
-          browserBound,
-          "the update",
-          CLEANUP_GRACE_MS,
-        );
+      if (claimsHmr || request.update !== undefined) {
+        if (acceptance.hmr === undefined) {
+          return {
+            events,
+            failure: {
+              phase: "browser",
+              message:
+                "an HMR update was requested but the manifest entry declares no HMR acceptance",
+            },
+          };
+        }
+        const preparedUpdate = createHmrUpdate(request.projectRoot, acceptance.hmr);
+        hmrUpdate = preparedUpdate;
+        const adapterUpdate = request.update;
+        let updateWindowOpen = true;
+        const updated = await (async () => {
+          try {
+            return await runUnder(
+              async (signal) => {
+                const assertUpdateWindowOpen = () => {
+                  if (!updateWindowOpen || signal.aborted) {
+                    throw new Error(
+                      "the manifest-declared HMR edit cannot be applied after the update window closes",
+                    );
+                  }
+                };
+                const apply = () => preparedUpdate.applyWhile(assertUpdateWindowOpen);
+
+                if (adapterUpdate === undefined) {
+                  await runDefaultHmrUpdate(page, signal, {
+                    expectedText: preparedUpdate.expectedText,
+                    apply,
+                    restore: () => preparedUpdate.restore(),
+                  });
+                  return;
+                }
+                let expectedTextObserved: boolean | undefined;
+                let expectedTextFailure: { readonly error: unknown } | undefined;
+                const missingExpectedText = () =>
+                  new Error(
+                    "the adapter update did not produce the manifest-declared expectedText",
+                  );
+                const adapterHmrUpdate: HmrUpdate = {
+                  expectedText: preparedUpdate.expectedText,
+                  apply,
+                  async restore(): Promise<void> {
+                    if (!preparedUpdate.isApplied()) return;
+                    try {
+                      const observed = await pageHasExpectedText(
+                        page,
+                        signal,
+                        preparedUpdate.expectedText,
+                      );
+                      expectedTextObserved = (expectedTextObserved ?? true) && observed;
+                    } catch (error) {
+                      expectedTextFailure ??= { error };
+                    } finally {
+                      await preparedUpdate.restore();
+                    }
+                  },
+                };
+                await adapterUpdate(page, signal, adapterHmrUpdate);
+                if (claimsHmr && !preparedUpdate.wasApplied()) {
+                  throw new Error(
+                    "the adapter update did not apply the manifest-declared HMR edit",
+                  );
+                }
+                if (claimsHmr) {
+                  if (expectedTextFailure !== undefined) throw expectedTextFailure.error;
+                  if (
+                    expectedTextObserved === false ||
+                    (expectedTextObserved === undefined &&
+                      !(await pageHasExpectedText(page, signal, preparedUpdate.expectedText)))
+                  ) {
+                    throw missingExpectedText();
+                  }
+                }
+              },
+              browserBound,
+              "the update",
+              CLEANUP_GRACE_MS,
+            );
+          } finally {
+            updateWindowOpen = false;
+          }
+        })();
         // Drained after every awaited page operation, whether it succeeded or not: an update
         // that reports an error and then rejects has still reported that error, and it happened
         // first.
@@ -498,6 +586,7 @@ async function observeBrowser(
     }
   } finally {
     browserBound.dispose();
+    await hmrUpdate?.restore();
   }
 }
 

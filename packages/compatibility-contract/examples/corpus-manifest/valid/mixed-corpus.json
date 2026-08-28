@@ -63,7 +63,7 @@
         "preview-output"
       ],
       "javascriptApiLevel": "C1",
-      "notes": "Illustrative entry. The adopted corpus is assembled by the M0 issues, not by this example."
+      "notes": "Illustrative entry whose declared HMR edit and expected text are executable runner inputs. The adopted corpus is assembled by the M0 issues, not by this example."
     },
     {
       "id": "vite-upstream-playground-slice",

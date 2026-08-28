@@ -1,5 +1,5 @@
 import { createServer } from "node:net";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,6 +7,7 @@ import {
   runCompatibilityCheck,
   type BrowserAdapter,
   type BrowserPage,
+  type HmrUpdate,
   type RunEnvironment,
   type RunReport,
 } from "@rsvite/compatibility-runner";
@@ -23,7 +24,6 @@ import {
   DRAWDB_REPOSITORY,
   DRAWDB_SENTINEL,
   drawDbCommandEnvironment,
-  drawDbHmrEdit,
   drawDbNpmVersion,
   rsviteWorkspaceVersion,
   type DrawDbRun,
@@ -232,19 +232,13 @@ function createDrawDbBrowserAdapter(): BrowserAdapter {
 export async function updateDrawDbStylesheet(
   page: BrowserPage,
   signal: AbortSignal,
-  projectRoot: string,
+  hmr: HmrUpdate,
 ): Promise<void> {
-  const hmrEdit = drawDbHmrEdit();
-  const source = join(projectRoot, hmrEdit.path);
-  const original = await readFile(source, "utf8");
-  const changed = original.replace(hmrEdit.find, hmrEdit.replace);
-  if (changed === original) throw new Error("DrawDB stylesheet has no HMR probe insertion point");
-
   const counter = await page.evaluate(HMR_UPDATE_COUNT, signal);
   if (typeof counter !== "number") throw new Error("DrawDB page has no Vite HMR update counter");
 
   let counterBeforeRestoration: number | undefined;
-  await writeFile(source, changed);
+  await hmr.apply();
   try {
     await waitForExpression(
       page,
@@ -262,7 +256,7 @@ export async function updateDrawDbStylesheet(
     }
     counterBeforeRestoration = observed;
   } finally {
-    await writeFile(source, original);
+    await hmr.restore();
   }
   if (counterBeforeRestoration === undefined) {
     throw new Error("DrawDB did not observe its stylesheet HMR update before restoration");
@@ -312,8 +306,8 @@ function runEnvironmentForLifecycle(
       ...(browser ? { browser } : {}),
       ...(run.lifecycle === "dev"
         ? {
-            update: (page: BrowserPage, signal: AbortSignal) =>
-              updateDrawDbStylesheet(page, signal, projectRoot),
+            update: (page: BrowserPage, signal: AbortSignal, hmr: HmrUpdate) =>
+              updateDrawDbStylesheet(page, signal, hmr),
           }
         : {}),
       timeouts: {

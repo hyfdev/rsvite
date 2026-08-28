@@ -108,6 +108,21 @@ models the property the sentinel rule depends on: navigating installs a new docu
 document does not inherit the previous document's memory. A real browser adapter belongs to the
 issue that consumes this runner.
 
+## HMR edits
+
+A run that claims `hmr-without-full-reload` executes the manifest's declared `hmr.edit`. By
+default the runner replaces the first exact `find` occurrence, waits for `expectedText` to change
+from absent to present in the page, reads the sentinel again, and restores the original file. The
+edit path must resolve to a file inside `projectRoot`; traversal and symlink escapes are rejected
+before any write. Restoration runs after success, failure, or timeout, and a restoration failure
+prevents a result from being written.
+
+Projects with stronger acceptance signals provide `update(page, signal, hmr)`. The override
+calls `hmr.apply()` so it cannot silently perform a different edit; it may call `hmr.restore()`
+early when observing the restoration is part of the check. The runner verifies that the declared
+edit was applied and performs a final idempotent restoration itself. `hmr.apply()` rejects after
+the update window closes or its abort signal fires, so late adapter work cannot mutate the source.
+
 ## Fixtures
 
 `fixtures/` holds a synthetic project — one HTTP server serving one document, and a script that

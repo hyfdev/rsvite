@@ -56,6 +56,17 @@ Focused fixtures and create-vite templates may isolate a failure or provide a fa
 
 ## Acceptance rules
 
+### HMR update ownership
+
+For a run that claims `hmr-without-full-reload`, the shared runner owns the manifest-declared `browserAcceptance.hmr.edit` and restores the original file before the run returns. The v1 manifest requires `edit` and `expectedText`. With no adapter override, the runner applies the declared find/replace and waits for `expectedText` to change from absent to present; it rejects a default check whose expected text was already present because that would not prove the edit reached the page.
+<!-- Author: rsvite-architect -->
+
+An adapter overrides the default only when a project needs additional work or a stronger observation, such as running an upstream test first, observing a stylesheet HMR frame, or waiting for framework stability. The runner passes the same declared edit handle to that override, requires an HMR-claiming override to apply it, and restores it on success, failure, or timeout. The edit handle rejects `apply()` after the update window closes or its abort signal fires. The adapter may restore early when restoration itself is part of the observation. The runner does not execute the default edit for non-HMR lifecycles or runs that do not claim HMR.
+<!-- Author: rsvite-architect -->
+
+Keeping these fields executable was chosen over making them optional: an optional action could again let the manifest describe an update different from the one an adapter performs. This ownership rule governs evidence mutation and cleanup only; it does not move project-specific browser signals, noise rules, or cold-phase records into the runner.
+<!-- Author: rsvite-architect -->
+
 - Run Vite and rsvite on the same runner image, exact project commit, lockfile, Node version, and browser version.
   <!-- Author: rsvite-lead -->
 - Record correctness, the first incompatible behavior, supported API level, capability owner, and every explicit fallback before interpreting performance.

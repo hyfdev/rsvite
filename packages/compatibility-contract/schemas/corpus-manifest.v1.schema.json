@@ -299,7 +299,7 @@
       }
     },
     "hmrAcceptance": {
-      "description": "An HMR check must observe an in-memory sentinel. Persisted application state cannot distinguish an update from a full reload, so a stored sentinel is rejected.",
+      "description": "An HMR check observes an in-memory sentinel around the declared file edit. Persisted application state cannot distinguish an update from a full reload, so a stored sentinel is rejected. The runner executes and restores the edit by default; an adapter override must apply the same declaration.",
       "type": "object",
       "additionalProperties": false,
       "required": ["sentinelExpression", "sentinelStorage", "edit", "expectedText"],
@@ -314,6 +314,7 @@
           "const": "in-memory"
         },
         "edit": {
+          "description": "The project-relative exact find/replace that the runner executes for this HMR check.",
           "type": "object",
           "additionalProperties": false,
           "required": ["path", "find", "replace"],
@@ -332,7 +333,7 @@
           }
         },
         "expectedText": {
-          "description": "Text expected in the page after the edit is applied.",
+          "description": "Text the runner requires in the page after the edit is applied.",
           "type": "string",
           "minLength": 1
         }

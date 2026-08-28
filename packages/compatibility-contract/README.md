@@ -66,6 +66,9 @@ Within one document:
   back to.
 - An HMR check whose sentinel is stored rather than held in memory, or that does not treat a
   main-frame navigation as a failure. Persisted state survives a reload and cannot prove an update.
+- An HMR acceptance object without its file edit or expected page text. Both are required in v1
+  because the shared runner executes them as the default update; an adapter override receives and
+  must apply that same declaration rather than substituting an unrecorded edit.
 - A measurement without its cache state and run order, which a comparison or a variation estimate
   cannot be built from.
 - `finishedAt` earlier than `startedAt`, and a Node or package-manager version that is not a
