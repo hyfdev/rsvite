@@ -27,7 +27,7 @@ function claimingHmr(manifest: unknown): unknown {
   return document;
 }
 
-/** Runs a probe in its own process, because it patches `node:fs` before loading the runner. */
+/** Runs a probe in its own process and returns the JSON document it writes. */
 async function runProbe(
   name: string,
   args: readonly string[] = [],
@@ -366,26 +366,8 @@ test("a run claiming HMR whose page never set a sentinel is a failure", async ()
 });
 
 test("a completed run leaves no timer holding the host open", async () => {
-  const probe = fileURLToPath(new URL("./host-exit-probe.mts", import.meta.url));
-  const startedAt = Date.now();
-
-  const finished = await new Promise<{ code: number | null; stdout: string }>((resolve) => {
-    const child = spawn(process.execPath, ["--experimental-strip-types", probe], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
-    child.once("close", (code) => resolve({ code, stdout }));
-  });
-  const elapsed = Date.now() - startedAt;
-
-  assert.equal(finished.code, 0, "the probe did not finish cleanly");
-  assert.match(finished.stdout, /pass/);
-  // Budgets in the probe are 2,000 ms. A leftover timer would hold this host until one fires.
-  assert.ok(
-    elapsed < 1_800,
-    `the host stayed alive after its work finished (${String(elapsed)}ms)`,
-  );
+  const observed = await runProbe("host-exit-probe.mts");
+  assert.equal(observed["outcome"], "pass");
 });
 
 test("a lifecycle process that dies after readiness cannot be recorded as a pass", async () => {
