@@ -98,6 +98,19 @@ export function withSupportedBuild(root: string, script: string): { argv(): stri
   };
 }
 
+/**
+ * A depth-1 clone of a fixture, with protected main pointing at its truncated tip. This is what a
+ * CI checkout that fetched only the newest commit looks like.
+ */
+export function shallowCloneOf(source: WorkspaceFixture): string {
+  const clone = trackTemporary(mkdtempSync(join(tmpdir(), "rsvite-shallow-")));
+  execFileSync("git", ["clone", "--depth", "1", `file://${source.root}`, clone], {
+    stdio: "ignore",
+  });
+  execFileSync("git", ["-C", clone, "update-ref", "refs/remotes/origin/main", "HEAD"]);
+  return clone;
+}
+
 /** Removes every temporary directory this module created. */
 export function cleanUpFixtures(): void {
   for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });

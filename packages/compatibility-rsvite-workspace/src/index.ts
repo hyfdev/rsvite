@@ -2,7 +2,9 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   accessSync,
   constants,
+  existsSync,
   lstatSync,
+  rmSync,
   readdirSync,
   readFileSync,
   readlinkSync,
@@ -35,6 +37,12 @@ export const RSVITE_PRODUCT_SOURCE_PATHS = [
 const PROTECTED_SOURCE_REF = "refs/remotes/origin/main";
 
 const RSVITE_PACKAGE_DIR = "packages/rsvite";
+
+/**
+ * The generated loader consults this before any package-local binary, so an ambient value makes
+ * every file check here describe something the process will not load.
+ */
+export const NATIVE_LIBRARY_OVERRIDE = "NAPI_RS_NATIVE_LIBRARY_PATH";
 const NATIVE_LOADER = "native.js";
 
 export interface RsviteWorkspaceSubject {
@@ -66,6 +74,18 @@ function gitBytes(root: string, args: readonly string[], what: string): Buffer {
   return result.stdout;
 }
 
+function requireCompleteHistory(root: string): void {
+  const shallow = spawnSync("git", ["rev-parse", "--is-shallow-repository"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (shallow.status === 0 && shallow.stdout.trim() === "true") {
+    throw new Error(
+      "this checkout is shallow, so the commit that owns the rsvite product source may be truncated away; unshallow it with `git fetch --unshallow`",
+    );
+  }
+}
+
 function requireProtectedRef(root: string): void {
   const present = spawnSync("git", ["rev-parse", "--verify", "--quiet", PROTECTED_SOURCE_REF], {
     cwd: root,
@@ -91,41 +111,13 @@ function ownerOf(root: string, ref: string, what: string): string {
 }
 
 /**
- * Rejects a working tree that told git to stop looking at product source.
- *
- * `assume-unchanged` and `skip-worktree` are honoured by `git status` and by `git diff` alike, so
- * a file carrying either flag can be edited and still report as pristine to both. Every check
- * below reads the file itself, but a flag that makes git lie about the product is a fact about
- * this checkout that a recording must refuse rather than work around.
- */
-function assertNoHiddenIndexFlags(root: string): void {
-  const listed = git(
-    root,
-    ["ls-files", "-v", "--", ...RSVITE_PRODUCT_SOURCE_PATHS],
-    "list the rsvite product source",
-  );
-  const hidden = listed
-    .split("\n")
-    .filter((line) => /^[a-z]/.test(line) || line.startsWith("S"))
-    .map((line) => line.slice(2));
-  if (hidden.length > 0) {
-    throw new Error(
-      `the rsvite product source has assume-unchanged or skip-worktree set, so git cannot report its state: ${hidden
-        .slice(0, 3)
-        .join(", ")}`,
-    );
-  }
-}
-
-/**
  * Compares the working tree against the owner's blobs directly.
  *
- * `git diff` consults the index, and the index is exactly what a hidden flag corrupts. Reading
- * each blob and each file settles the question with the bytes themselves.
+ * `git diff` consults the index, and `assume-unchanged` or `skip-worktree` make the index lie.
+ * Reading each blob and each file settles the question with the bytes themselves, so a hidden
+ * hint changes nothing about what this sees.
  */
 function assertProductSourceMatches(root: string, owner: string): void {
-  assertNoHiddenIndexFlags(root);
-
   // Modes matter as much as bytes: git records a symlink as a blob holding its target, and it
   // records the executable bit, so comparing file contents alone would both misread a link and
   // miss a permission change the owner never had.
@@ -189,6 +181,7 @@ function assertProductSourceMatches(root: string, owner: string): void {
  * its own newer commit becomes the local owner; an edited file fails the third.
  */
 export function resolveRsviteSourceOwner(root = defaultRepositoryRoot): string {
+  requireCompleteHistory(root);
   requireProtectedRef(root);
   const protectedOwner = ownerOf(root, PROTECTED_SOURCE_REF, "read the protected rsvite source");
   const localOwner = ownerOf(root, "HEAD", "read this checkout's rsvite source");
@@ -263,29 +256,61 @@ export interface RsvitePreparation {
 /**
  * Everything a recorder must know before it touches an external checkout or writes evidence.
  *
- * There is no way to supply a different build: the supported one is the only thing whose output
- * this may accept, and a caller able to substitute it could record a subject the repository never
- * produced. The order is the rest of the guarantee — identity is settled before the build runs,
- * the source is proven again afterwards because the build is defined by files the product source
- * deliberately excludes, and the command is resolved through this checkout's own package last, so
- * a same-named executable on the host can never stand in for the thing being measured.
+ * The subject, the build, the outputs and the command are bound to each other. Only the
+ * repository's supported build may produce what this accepts; its outputs are removed first and
+ * required afterwards, so they are this invocation's; the source is resolved completely again
+ * once the build has run, because protected main can move while it runs; and the command comes
+ * from this package's own `bin`, so nothing on the host can stand in for it.
  */
 export function prepareRsviteWorkspace(root = defaultRepositoryRoot): RsvitePreparation {
-  const subject = readRsviteWorkspaceSubject(root);
-  runSupportedNativeBuild(root);
-  // The build runs whatever root task orchestration says, and that orchestration is not product
-  // source, so a build is free to have changed the product under us.
-  assertProductSourceMatches(root, subject.commit);
+  if (process.env[NATIVE_LIBRARY_OVERRIDE] !== undefined) {
+    throw new Error(
+      `${NATIVE_LIBRARY_OVERRIDE} is set, so the loader would prefer a binary outside ${RSVITE_PACKAGE_DIR}; unset it before recording`,
+    );
+  }
 
+  const subject = readRsviteWorkspaceSubject(root);
   const packageDir = realpathSync(join(root, RSVITE_PACKAGE_DIR));
-  requireContainedRegularFile(
-    packageDir,
-    join(packageDir, NATIVE_LOADER),
-    `the ${NATIVE_LOADER} loader`,
-  );
+  const loader = join(packageDir, NATIVE_LOADER);
+  const binary = join(packageDir, hostNativeBinaryName());
+
+  // Removed first, required afterwards: otherwise a build that exits zero without writing
+  // anything hands back whatever an earlier run happened to leave here.
+  rmSync(loader, { force: true, recursive: true });
+  rmSync(binary, { force: true, recursive: true });
+
+  runSupportedNativeBuild(root);
+
+  // A complete resolution, not a comparison against the owner chosen earlier: protected main can
+  // advance while the build runs, including to a commit that restores these exact bytes.
+  const after = readRsviteWorkspaceSubject(root);
+  if (after.commit !== subject.commit || after.version !== subject.version) {
+    throw new Error(
+      `the rsvite product source became ${after.commit} while the native build ran; it was ${subject.commit}`,
+    );
+  }
+
+  requireContainedRegularFile(packageDir, loader, `the ${NATIVE_LOADER} loader`);
   requirePlatformBinary(packageDir);
 
   return { subject, executable: workspaceExecutable(packageDir) };
+}
+
+/**
+ * Proves a subject is still the one this checkout builds, at the moment it is about to be used.
+ * Preparation and the run that records it are separate processes, and protected main can move
+ * between them.
+ */
+export function assertPreparedSubjectIsStillCurrent(
+  subject: RsviteWorkspaceSubject,
+  root = defaultRepositoryRoot,
+): void {
+  const current = readRsviteWorkspaceSubject(root);
+  if (current.commit !== subject.commit || current.version !== subject.version) {
+    throw new Error(
+      `the prepared rsvite subject ${subject.commit} is no longer current; this checkout now builds ${current.commit}`,
+    );
+  }
 }
 
 function runSupportedNativeBuild(root: string): void {
@@ -312,22 +337,35 @@ function requireContainedRegularFile(packageDir: string, path: string, what: str
   return canonical;
 }
 
-/** The binary this host would actually load, not any `.node` the directory happens to hold. */
+/**
+ * The one file this host's loader would open.
+ *
+ * A prefix is not an answer: on Linux the ABI suffix is the whole question, and a musl binary on
+ * a glibc host is accepted by `rsvite.linux-x64*` while being unloadable.
+ */
+export function hostNativeBinaryName(): string {
+  const { platform, arch } = process;
+  if (platform === "linux") {
+    const report = process.report?.getReport() as { header?: { glibcVersionRuntime?: string } };
+    const abi = report?.header?.glibcVersionRuntime === undefined ? "musl" : "gnu";
+    return `rsvite.linux-${arch}-${abi}.node`;
+  }
+  if (platform === "win32") return `rsvite.win32-${arch}-msvc.node`;
+  return `rsvite.${platform}-${arch}.node`;
+}
+
 function requirePlatformBinary(packageDir: string): string {
-  const expected = `rsvite.${process.platform}-${process.arch}`;
-  const candidates = readdirSync(packageDir).filter(
-    (entry) => entry.startsWith(`${expected}`) && entry.endsWith(".node"),
-  );
-  const name = candidates[0];
-  if (name === undefined) {
+  const name = hostNativeBinaryName();
+  const path = join(packageDir, name);
+  if (!existsSync(path)) {
     const seen = readdirSync(packageDir).filter((entry) => entry.endsWith(".node"));
     throw new Error(
-      `the native build produced no ${expected}*.node in ${RSVITE_PACKAGE_DIR}${
+      `the native build produced no ${name} in ${RSVITE_PACKAGE_DIR}${
         seen.length > 0 ? `; it produced ${seen.join(", ")}` : ""
       }`,
     );
   }
-  return requireContainedRegularFile(packageDir, join(packageDir, name), `the ${name} binary`);
+  return requireContainedRegularFile(packageDir, path, `the ${name} binary`);
 }
 
 /** Resolved from the package's own `bin` entry, required to stay inside it, and runnable. */

@@ -1,6 +1,9 @@
 import { mkdir, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { readRsviteWorkspaceSubject } from "@rsvite/compatibility-rsvite-workspace";
+import {
+  assertPreparedSubjectIsStillCurrent,
+  prepareRsviteWorkspace,
+} from "@rsvite/compatibility-rsvite-workspace";
 import { runCompatibilityCheck } from "@rsvite/compatibility-runner";
 import {
   HTML_PRESERVE_COMMENTS_ENTRY_ID,
@@ -32,7 +35,9 @@ const runnerImage = required("RUNNER_IMAGE");
 const host = assertLinuxX64Host();
 const packageManager = htmlPreserveCommentsPackageManager();
 const stagingRoot = `${rsviteBaselineDir}.recording`;
-const rsviteSubject = readRsviteWorkspaceSubject();
+// Prepared here, where the recording actually happens: the subject this records is the one this
+// process built and validated, not one an earlier step decided and handed along.
+const rsviteSubject = prepareRsviteWorkspace().subject;
 
 assertPinnedCleanViteCheckout(checkout);
 ensureManifestPnpmOnPath(packageManager.version);
@@ -88,6 +93,8 @@ try {
 
   assertPinnedCleanViteCheckout(checkout);
   await rm(rsviteBaselineDir, { recursive: true, force: true });
+  // Between preparation and here the run took minutes; protected main may have moved.
+  assertPreparedSubjectIsStillCurrent(rsviteSubject);
   await rename(stagingRoot, rsviteBaselineDir);
   process.stdout.write(`${rsviteBaselineResultPath}\n`);
 } finally {

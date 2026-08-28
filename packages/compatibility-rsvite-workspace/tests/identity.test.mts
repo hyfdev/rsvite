@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, test } from "vite-plus/test";
@@ -7,7 +8,7 @@ import {
   readRsviteWorkspaceSubject,
   resolveRsviteSourceOwner,
 } from "../src/index.ts";
-import { cleanUpFixtures, workspaceFixture } from "./support.mts";
+import { cleanUpFixtures, shallowCloneOf, workspaceFixture } from "./support.mts";
 
 afterAll(cleanUpFixtures);
 
@@ -176,7 +177,7 @@ test("a checkout that cannot see protected main says so, instead of guessing", (
   );
 });
 
-test("a hidden index flag cannot make an edited product source look pristine", () => {
+test("an edit hidden from git's own answers is still caught by comparing the bytes", () => {
   for (const flag of ["--assume-unchanged", "--skip-worktree"] as const) {
     const workspace = workspaceFixture();
     const tracked = "crates/rsvite_core/src/lib.rs";
@@ -189,10 +190,17 @@ test("a hidden index flag cannot make an edited product source look pristine", (
 
     assert.throws(
       () => resolveRsviteSourceOwner(workspace.root),
-      /assume-unchanged or skip-worktree/,
+      new RegExp(`differs from .* at ${tracked}`),
       `${flag} let an edited product source resolve as the protected owner`,
     );
   }
+});
+
+test("a benign index hint on unchanged product source is not an obstacle", () => {
+  const workspace = workspaceFixture();
+  workspace.git("update-index", "--assume-unchanged", "crates/rsvite_core/src/lib.rs");
+
+  assert.equal(resolveRsviteSourceOwner(workspace.root), workspace.owner);
 });
 
 test("a product source file whose executable bit changed is not the owner's", () => {
@@ -202,5 +210,28 @@ test("a product source file whose executable bit changed is not the owner's", ()
   assert.throws(
     () => resolveRsviteSourceOwner(workspace.root),
     /different mode from .* at packages\/rsvite\/bin\/rsvite\.js/,
+  );
+});
+
+test("a shallow checkout refuses to name an owner it may not have", () => {
+  const workspace = workspaceFixture();
+  // Protected main advances with a change that is not product source, so the truncated tip of a
+  // depth-1 clone is not the owner — and the real owner is no longer in that clone's history.
+  workspace.write("vite.config.ts", "export default { changed: true };\n");
+  workspace.commit("chore: change root test orchestration");
+  workspace.publish();
+
+  const shallow = shallowCloneOf(workspace);
+  assert.equal(
+    execFileSync("git", ["-C", shallow, "rev-parse", "--is-shallow-repository"], {
+      encoding: "utf8",
+    }).trim(),
+    "true",
+  );
+
+  assert.throws(
+    () => resolveRsviteSourceOwner(shallow),
+    /this checkout is shallow/,
+    "a truncated tip was accepted as the commit that owns the product source",
   );
 });

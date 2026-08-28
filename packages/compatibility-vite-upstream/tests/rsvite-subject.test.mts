@@ -136,8 +136,7 @@ test("the paired recorder validates the workspace before preparation or evidence
     runTask: (task) => calls.push(task),
     recordRsvite: () => calls.push("record:rsvite"),
   });
-  // The native build is part of preflight, not a separate step: identity, build and workspace
-  // command are settled together before anything external is touched or any evidence is written.
+  // The rsvite recording prepares its own subject, so the pair only orders the two recordings.
   assert.deepEqual(calls, ["preflight", "record:vite-upstream:baseline", "record:rsvite"]);
 
   const effects: string[] = [];

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { prepareRsviteWorkspace } from "@rsvite/compatibility-rsvite-workspace";
+import { NATIVE_LIBRARY_OVERRIDE } from "@rsvite/compatibility-rsvite-workspace";
 import { assertLinuxX64Host } from "../src/index.ts";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -31,7 +31,13 @@ export function pairedRecordingEnvironment(
     }
   }
 
-  return { ...source };
+  // The generated loader prefers this over any package-local binary, so a recording that
+  // forwarded it would measure a native module nothing here built.
+  const { [NATIVE_LIBRARY_OVERRIDE]: overridden, ...forwarded } = source;
+  if (overridden !== undefined) {
+    process.stderr.write(`ignoring ambient ${NATIVE_LIBRARY_OVERRIDE} for this recording\n`);
+  }
+  return forwarded;
 }
 
 function main(): void {
@@ -40,7 +46,6 @@ function main(): void {
   runRsvitePair({
     preflight: () => {
       assertLinuxX64Host();
-      prepareRsviteWorkspace(repositoryRoot);
     },
     runTask: (task) => {
       execFileSync(vp, ["run", "--no-cache", task], {

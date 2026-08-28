@@ -3,7 +3,12 @@ import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, test } from "vite-plus/test";
-import { prepareRsviteWorkspace } from "../src/index.ts";
+import {
+  assertPreparedSubjectIsStillCurrent,
+  hostNativeBinaryName,
+  NATIVE_LIBRARY_OVERRIDE,
+  prepareRsviteWorkspace,
+} from "../src/index.ts";
 import {
   cleanUpFixtures,
   trackTemporary,
@@ -15,7 +20,7 @@ afterAll(cleanUpFixtures);
 
 /** What a real native build leaves behind on this host. */
 const OUTPUTS = `printf 'export class DevServer {}\\n' > packages/rsvite/native.js
-printf '\\0binary\\n' > packages/rsvite/rsvite.${process.platform}-${process.arch}-gnu.node`;
+printf '\\0binary\\n' > packages/rsvite/${hostNativeBinaryName()}`;
 
 test("preparation runs the supported build and returns this checkout's own command", () => {
   const workspace = workspaceFixture();
@@ -90,7 +95,7 @@ test("a directory cannot impersonate the loader or the platform binary", () => {
   const loader = workspaceFixture();
   withSupportedBuild(
     loader.root,
-    `mkdir -p packages/rsvite/native.js\nprintf '\\0\\n' > packages/rsvite/rsvite.${process.platform}-${process.arch}-gnu.node`,
+    `mkdir -p packages/rsvite/native.js\nprintf '\\0\\n' > packages/rsvite/${hostNativeBinaryName()}`,
   );
   assert.throws(
     () => prepareRsviteWorkspace(loader.root),
@@ -100,7 +105,7 @@ test("a directory cannot impersonate the loader or the platform binary", () => {
   const binary = workspaceFixture();
   withSupportedBuild(
     binary.root,
-    `printf 'x\\n' > packages/rsvite/native.js\nmkdir -p packages/rsvite/rsvite.${process.platform}-${process.arch}-gnu.node`,
+    `printf 'x\\n' > packages/rsvite/native.js\nmkdir -p packages/rsvite/${hostNativeBinaryName()}`,
   );
   assert.throws(() => prepareRsviteWorkspace(binary.root), /is not a regular file/);
 });
@@ -114,7 +119,7 @@ test("a binary built for another platform is not accepted as this host's", () =>
 
   assert.throws(
     () => prepareRsviteWorkspace(workspace.root),
-    new RegExp(`produced no rsvite\\.${process.platform}-${process.arch}\\*\\.node`),
+    new RegExp(`produced no ${hostNativeBinaryName().replaceAll(".", "\\.")}`),
   );
 });
 
@@ -125,7 +130,7 @@ test("a loader that links out to a host file is refused", () => {
   const workspace = workspaceFixture();
   withSupportedBuild(
     workspace.root,
-    `ln -s ${JSON.stringify(join(outside, "native.js"))} packages/rsvite/native.js\nprintf '\\0\\n' > packages/rsvite/rsvite.${process.platform}-${process.arch}-gnu.node`,
+    `ln -s ${JSON.stringify(join(outside, "native.js"))} packages/rsvite/native.js\nprintf '\\0\\n' > packages/rsvite/${hostNativeBinaryName()}`,
   );
 
   assert.throws(() => prepareRsviteWorkspace(workspace.root), /resolves outside packages\/rsvite/);
@@ -177,4 +182,76 @@ test("a package that declares no rsvite command is refused", () => {
   withSupportedBuild(workspace.root, OUTPUTS);
 
   assert.throws(() => prepareRsviteWorkspace(workspace.root), /declares no rsvite command/);
+});
+
+test("outputs an earlier run left behind are not accepted as this build's", () => {
+  const workspace = workspaceFixture();
+  writeFileSync(join(workspace.root, "packages/rsvite/native.js"), "export class DevServer {}\n");
+  writeFileSync(join(workspace.root, `packages/rsvite/${hostNativeBinaryName()}`), "\0stale\n");
+  // Exits zero, writes nothing: running the supported command is not producing its outputs.
+  withSupportedBuild(workspace.root, "exit 0");
+
+  assert.throws(
+    () => prepareRsviteWorkspace(workspace.root),
+    /native\.js loader is missing/,
+    "stale outputs from an earlier run were accepted as this invocation's",
+  );
+});
+
+test("a build that advances protected main is refused, even back to identical bytes", () => {
+  const workspace = workspaceFixture();
+  const original = "pub fn serve() {}\n";
+  withSupportedBuild(
+    workspace.root,
+    [
+      OUTPUTS,
+      `printf 'pub fn serve() { /* moved */ }\\n' > crates/rsvite_core/src/lib.rs`,
+      `git add -A && git commit --quiet -m 'advance the product'`,
+      `printf ${JSON.stringify(original)} > crates/rsvite_core/src/lib.rs`,
+      `git add -A && git commit --quiet -m 'restore the bytes'`,
+      `git update-ref refs/remotes/origin/main HEAD`,
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () => prepareRsviteWorkspace(workspace.root),
+    /became .* while the native build ran/,
+    "the subject stayed at the pre-build owner while protected main moved past it",
+  );
+});
+
+test("an ambient native-library override is refused before anything is built", () => {
+  const workspace = workspaceFixture();
+  const build = withSupportedBuild(workspace.root, OUTPUTS);
+  process.env[NATIVE_LIBRARY_OVERRIDE] = "/tmp/foreign.node";
+
+  try {
+    assert.throws(
+      () => prepareRsviteWorkspace(workspace.root),
+      new RegExp(`${NATIVE_LIBRARY_OVERRIDE} is set`),
+      "a recording would have loaded a binary from outside the package",
+    );
+    assert.deepEqual(build.argv(), [], "the build ran under an override that redirects the loader");
+  } finally {
+    delete process.env[NATIVE_LIBRARY_OVERRIDE];
+  }
+});
+
+test("a prepared subject that protected main has moved past is not published", () => {
+  const workspace = workspaceFixture();
+  withSupportedBuild(workspace.root, OUTPUTS);
+  const prepared = prepareRsviteWorkspace(workspace.root);
+
+  // The window between preparing and recording: minutes, during which main can move.
+  workspace.write("crates/rsvite_core/src/lib.rs", "pub fn serve() { /* newer */ }\n");
+  workspace.commit("feat: advance the product after preparation");
+  workspace.publish();
+
+  assert.throws(
+    () => {
+      assertPreparedSubjectIsStillCurrent(prepared.subject, workspace.root);
+    },
+    /no longer current/,
+    "a subject prepared before the product moved was still treated as publishable",
+  );
 });
