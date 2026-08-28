@@ -188,7 +188,7 @@ async fn serve_request(
     if uri.path() == "/" {
         return serve_root_html(&state.root).await;
     }
-    if uri.path().ends_with(".js") {
+    if uri.path().ends_with(".js") || uri.path().ends_with(".ts") {
         return serve_javascript(&state, uri.path()).await;
     }
     response(StatusCode::NOT_FOUND, None, Body::empty())
@@ -412,108 +412,279 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_unsupported_or_escaping_javascript_requests_without_a_fallback() {
+    async fn transforms_typescript_resolves_extensions_and_replaces_graph_edges() {
+        let root = TempDir::new().unwrap();
+        write_index(
+            root.path(),
+            "<script type=\"module\" src=\"/src/main.ts\"></script>",
+        );
+        write_project_file(
+            root.path(),
+            "src/main.ts",
+            "import { preferred } from './choice';\nimport { selected } from './choice.ts';\nimport { typed } from './typed';\nconst value: string = preferred + selected + typed;\ndocument.body.textContent = value;\n",
+        );
+        write_project_file(
+            root.path(),
+            "src/choice.js",
+            "export const preferred = 'js';\n",
+        );
+        write_project_file(
+            root.path(),
+            "src/choice.ts",
+            "export const selected: string = 'explicit-ts';\n",
+        );
+        write_project_file(
+            root.path(),
+            "src/typed.ts",
+            "export const typed: string = 'extensionless-ts';\n",
+        );
+        write_project_file(
+            root.path(),
+            "src/next.ts",
+            "export const next: string = 'next';\n",
+        );
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+
+        let main = request(&server, "GET", "/src/main.ts").await;
+        assert!(main.starts_with("HTTP/1.1 200 OK"), "{main}");
+        assert!(
+            main.contains("content-type: text/javascript; charset=utf-8"),
+            "{main}"
+        );
+        assert!(main.contains("cache-control: no-store"), "{main}");
+        assert!(response_body(&main).contains("from \"/src/choice.js\""));
+        assert!(response_body(&main).contains("from \"/src/choice.ts\""));
+        assert!(response_body(&main).contains("from \"/src/typed.ts\""));
+        assert!(!response_body(&main).contains(": string"));
+        assert!(has_import_edge(&server, "src/main.ts", "src/choice.js"));
+        assert!(has_import_edge(&server, "src/main.ts", "src/choice.ts"));
+        assert!(has_import_edge(&server, "src/main.ts", "src/typed.ts"));
+
+        let dependency = request(&server, "GET", "/src/typed.ts").await;
+        assert!(dependency.starts_with("HTTP/1.1 200 OK"), "{dependency}");
+        assert!(!response_body(&dependency).contains(": string"));
+
+        write_project_file(
+            root.path(),
+            "src/main.ts",
+            "import { next } from './next.ts';\nconst value: string = next;\nvoid value;\n",
+        );
+        let updated = request(&server, "GET", "/src/main.ts").await;
+        assert!(updated.starts_with("HTTP/1.1 200 OK"), "{updated}");
+        assert!(response_body(&updated).contains("from \"/src/next.ts\""));
+        assert!(has_import_edge(&server, "src/main.ts", "src/next.ts"));
+        assert!(!has_import_edge(&server, "src/main.ts", "src/choice.js"));
+        assert!(!has_import_edge(&server, "src/main.ts", "src/choice.ts"));
+        assert!(!has_import_edge(&server, "src/main.ts", "src/typed.ts"));
+
+        server.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn typescript_failures_preserve_the_last_successful_graph_edges() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "ok");
+        write_project_file(
+            root.path(),
+            "src/main.ts",
+            "import { previous } from './previous';\nconst value: string = previous;\nvoid value;\n",
+        );
+        write_project_file(
+            root.path(),
+            "src/previous.ts",
+            "export const previous: string = 'previous';\n",
+        );
+        write_project_file(
+            root.path(),
+            "src/next.ts",
+            "export const next: string = 'next';\n",
+        );
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+
+        let successful = request(&server, "GET", "/src/main.ts").await;
+        assert!(successful.starts_with("HTTP/1.1 200 OK"), "{successful}");
+        assert!(has_import_edge(&server, "src/main.ts", "src/previous.ts"));
+
+        write_project_file(
+            root.path(),
+            "src/main.ts",
+            "import { next } from './next';\nconst broken: = next;\n",
+        );
+        let parser_failure = request(&server, "GET", "/src/main.ts").await;
+        assert!(
+            parser_failure.starts_with("HTTP/1.1 400"),
+            "{parser_failure}"
+        );
+        assert!(
+            parser_failure.contains("parser diagnostic"),
+            "{parser_failure}"
+        );
+        assert!(has_import_edge(&server, "src/main.ts", "src/previous.ts"));
+        assert!(!has_import_edge(&server, "src/main.ts", "src/next.ts"));
+
+        write_project_file(
+            root.path(),
+            "src/main.ts",
+            "import { next } from './next';\nconst target: Element | null = document.querySelector<Element>('body');\nif (target !== null) target.textContent = next;\n",
+        );
+        let transform_failure = request(&server, "GET", "/src/main.ts").await;
+        assert!(
+            transform_failure.starts_with("HTTP/1.1 400"),
+            "{transform_failure}"
+        );
+        assert!(
+            transform_failure.contains("unsupported TypeScript syntax"),
+            "{transform_failure}"
+        );
+        assert!(has_import_edge(&server, "src/main.ts", "src/previous.ts"));
+        assert!(!has_import_edge(&server, "src/main.ts", "src/next.ts"));
+
+        for member in [
+            "public value = next;",
+            "private value = next;",
+            "protected value = next;",
+            "readonly value = next;",
+            "override value = next;",
+            "public static readonly value = next;",
+            "public method() { return next; }",
+            "protected get value() { return next; }",
+            "private set value(input) { void input; }",
+            "constructor(public value = next) {}",
+        ] {
+            let source = format!(
+                "import {{ next }} from './next';\nclass Unsupported {{ {member} }}\nconst value: string = next;\nvoid value;\n"
+            );
+            write_project_file(root.path(), "src/main.ts", &source);
+            let class_modifier_failure = request(&server, "GET", "/src/main.ts").await;
+            assert!(
+                class_modifier_failure.starts_with("HTTP/1.1 400"),
+                "member={member:?}\n{class_modifier_failure}"
+            );
+            assert!(
+                class_modifier_failure.contains("unsupported TypeScript syntax"),
+                "member={member:?}\n{class_modifier_failure}"
+            );
+            assert!(has_import_edge(&server, "src/main.ts", "src/previous.ts"));
+            assert!(!has_import_edge(&server, "src/main.ts", "src/next.ts"));
+        }
+
+        server.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rejects_unsupported_or_escaping_module_requests_without_a_fallback() {
         let root = TempDir::new().unwrap();
         let outside = TempDir::new().unwrap();
         write_index(root.path(), "ok");
-        write_project_file(root.path(), "src/main.js", "export {};\n");
         write_project_file(root.path(), "src/style.css", "body {}\n");
         create_dir_all(root.path().join("src/directory")).unwrap();
-        write(
-            outside.path().join("outside.js"),
-            "export const outside = true;\n",
-        )
-        .unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(
-            outside.path().join("outside.js"),
-            root.path().join("src/escape.js"),
-        )
-        .unwrap();
+        for extension in ["js", "ts"] {
+            write(
+                outside.path().join(format!("outside.{extension}")),
+                "export const outside = true;\n",
+            )
+            .unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(
+                outside.path().join(format!("outside.{extension}")),
+                root.path().join(format!("src/escape.{extension}")),
+            )
+            .unwrap();
+        }
         let server = DevServer::start(root.path(), 0).await.unwrap();
 
-        for (source, status, marker) in [
-            (
-                "import 'a-package';\n",
-                "HTTP/1.1 400",
-                "bare import \"a-package\" is not supported",
-            ),
-            (
-                "import 'https://example.com/module.js';\n",
-                "HTTP/1.1 400",
-                "URL import \"https://example.com/module.js\" is not supported",
-            ),
-            (
-                "import '../../outside';\n",
-                "HTTP/1.1 403",
-                "traverses outside the project root",
-            ),
-            (
-                "import './directory';\n",
-                "HTTP/1.1 400",
-                "directory import \"./directory\" is not supported",
-            ),
-            (
-                "import './style.css';\n",
-                "HTTP/1.1 415",
-                "unsupported import file type \"./style.css\"",
-            ),
-            (
-                "import './missing';\n",
-                "HTTP/1.1 404",
-                "import \"./missing\" was not found",
-            ),
-            (
-                "void import('./message.js');\n",
-                "HTTP/1.1 400",
-                "dynamic imports are not supported",
-            ),
-            (
-                "import {\n",
-                "HTTP/1.1 400",
-                "cannot analyze JavaScript module /src/main.js",
-            ),
-        ] {
-            write_project_file(root.path(), "src/main.js", source);
-            let response = request(&server, "GET", "/src/main.js").await;
-            assert!(response.starts_with(status), "{response}");
-            assert!(response.contains(marker), "{response}");
+        for extension in ["js", "ts"] {
+            let main_file = format!("src/main.{extension}");
+            let main_request = format!("/src/main.{extension}");
+            for (source, status, marker) in [
+                (
+                    "import 'a-package';\n",
+                    "HTTP/1.1 400",
+                    "bare import \"a-package\" is not supported",
+                ),
+                (
+                    "import 'https://example.com/module.js';\n",
+                    "HTTP/1.1 400",
+                    "URL import \"https://example.com/module.js\" is not supported",
+                ),
+                (
+                    "import '../../outside';\n",
+                    "HTTP/1.1 403",
+                    "traverses outside the project root",
+                ),
+                (
+                    "import './directory';\n",
+                    "HTTP/1.1 400",
+                    "directory import \"./directory\" is not supported",
+                ),
+                (
+                    "import './style.css';\n",
+                    "HTTP/1.1 415",
+                    "unsupported import file type \"./style.css\"",
+                ),
+                (
+                    "import './message?raw';\n",
+                    "HTTP/1.1 400",
+                    "import queries and fragments are not supported",
+                ),
+                (
+                    "import './missing';\n",
+                    "HTTP/1.1 404",
+                    "import \"./missing\" was not found",
+                ),
+                (
+                    "void import('./message.js');\n",
+                    "HTTP/1.1 400",
+                    "dynamic imports are not supported",
+                ),
+                ("import {\n", "HTTP/1.1 400", "cannot analyze module"),
+            ] {
+                write_project_file(root.path(), &main_file, source);
+                let response = request(&server, "GET", &main_request).await;
+                assert!(response.starts_with(status), "{response}");
+                assert!(response.contains(marker), "{response}");
+            }
+
+            #[cfg(unix)]
+            {
+                write_project_file(
+                    root.path(),
+                    &main_file,
+                    &format!("import './escape.{extension}';\n"),
+                );
+                let imported_escape = request(&server, "GET", &main_request).await;
+                assert!(
+                    imported_escape.starts_with("HTTP/1.1 403"),
+                    "{imported_escape}"
+                );
+                assert!(
+                    imported_escape.contains("escapes the project root"),
+                    "{imported_escape}"
+                );
+
+                let requested_escape =
+                    request(&server, "GET", &format!("/src/escape.{extension}")).await;
+                assert!(
+                    requested_escape.starts_with("HTTP/1.1 403"),
+                    "{requested_escape}"
+                );
+                assert!(
+                    requested_escape.contains("request escapes the project root"),
+                    "{requested_escape}"
+                );
+            }
+
+            let traversal = request(&server, "GET", &format!("/src/%2e%2e/main.{extension}")).await;
+            assert!(traversal.starts_with("HTTP/1.1 400"), "{traversal}");
+            assert!(
+                traversal.contains("traversing module request path"),
+                "{traversal}"
+            );
+
+            let missing = request(&server, "GET", &format!("/src/missing.{extension}")).await;
+            assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");
+            assert!(missing.contains("module not found"), "{missing}");
         }
-
-        #[cfg(unix)]
-        {
-            write_project_file(root.path(), "src/main.js", "import './escape.js';\n");
-            let imported_escape = request(&server, "GET", "/src/main.js").await;
-            assert!(
-                imported_escape.starts_with("HTTP/1.1 403"),
-                "{imported_escape}"
-            );
-            assert!(
-                imported_escape.contains("escapes the project root"),
-                "{imported_escape}"
-            );
-
-            let requested_escape = request(&server, "GET", "/src/escape.js").await;
-            assert!(
-                requested_escape.starts_with("HTTP/1.1 403"),
-                "{requested_escape}"
-            );
-            assert!(
-                requested_escape.contains("request escapes the project root"),
-                "{requested_escape}"
-            );
-        }
-
-        let traversal = request(&server, "GET", "/src/%2e%2e/main.js").await;
-        assert!(traversal.starts_with("HTTP/1.1 400"), "{traversal}");
-        assert!(
-            traversal.contains("traversing JavaScript request path"),
-            "{traversal}"
-        );
-
-        let missing = request(&server, "GET", "/src/missing.js").await;
-        assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");
-        assert!(missing.contains("JavaScript module not found"), "{missing}");
 
         server.close().await.unwrap();
     }

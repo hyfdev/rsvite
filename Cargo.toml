@@ -11,6 +11,8 @@ napi = { version = "=3.12.2", features = ["async", "napi8"] }
 napi-build = "=2.4.1"
 napi-derive = "=3.6.2"
 oxc_allocator = "=0.147.0"
+oxc_ast = "=0.147.0"
+oxc_ast_visit = "=0.147.0"
 oxc_parser = "=0.147.0"
 oxc_span = "=0.147.0"
 percent-encoding = "=2.3.2"

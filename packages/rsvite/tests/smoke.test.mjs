@@ -10,7 +10,8 @@ import { expect, test } from "vite-plus/test";
 const packageRoot = dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const repositoryRoot = resolve(packageRoot, "../..");
 const pnpmBin = resolve(repositoryRoot, "node_modules/.bin/rsvite");
-const fixtureRoot = resolve(repositoryRoot, "fixtures/m1-basic-html");
+const htmlFixtureRoot = resolve(repositoryRoot, "fixtures/m1-basic-html");
+const typescriptFixtureRoot = resolve(repositoryRoot, "fixtures/m1-basic-typescript");
 
 function waitForAddress(child) {
   return new Promise((resolveAddress, rejectAddress) => {
@@ -111,22 +112,19 @@ async function interruptOnFirstReadiness(root, signal) {
   }
 }
 
-for (const signal of ["SIGTERM", "SIGINT"]) {
-  test(`the first readiness bytes already guarantee clean ${signal} shutdown`, async () => {
-    const root = await mkdtemp(join(tmpdir(), "rsvite-m1-readiness-"));
-    await cp(resolve(fixtureRoot, "index.html"), join(root, "index.html"));
-    try {
-      for (let trial = 0; trial < 10; trial += 1) {
-        await interruptOnFirstReadiness(root, signal);
-      }
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  }, 20_000);
-}
-
-test("pnpm's rsvite bin executes Rust-resolved modules, reloads a dependency, and shuts down", async () => {
-  const root = await mkdtemp(join(tmpdir(), "rsvite-m1-html-"));
+async function proveBrowserModuleFixture({
+  fixtureRoot,
+  entryPath,
+  dependencyPath,
+  title,
+  initialText,
+  updatedText,
+  transformedIncludes,
+  transformedExcludes,
+  dependencyExcludes = [],
+  rejectedEntrySource,
+}) {
+  const root = await mkdtemp(join(tmpdir(), "rsvite-m1-module-"));
   await cp(fixtureRoot, root, { recursive: true });
   const child = spawn(pnpmBin, [root, "--port", "0"], {
     cwd: repositoryRoot,
@@ -145,38 +143,55 @@ test("pnpm's rsvite bin executes Rust-resolved modules, reloads a dependency, an
     });
     page.on("pageerror", (error) => errors.push(error.message));
 
-    const mainModuleResponse = page.waitForResponse(
-      (candidate) => new URL(candidate.url()).pathname === "/src/main.js",
+    const entryResponse = page.waitForResponse(
+      (candidate) => new URL(candidate.url()).pathname === entryPath,
     );
     const dependencyResponse = page.waitForResponse(
-      (candidate) => new URL(candidate.url()).pathname === "/src/message.js",
+      (candidate) => new URL(candidate.url()).pathname === dependencyPath,
     );
     const response = await page.goto(`${origin}/`);
-    const mainModule = await mainModuleResponse;
+    const entry = await entryResponse;
     const dependency = await dependencyResponse;
     expect(response?.status()).toBe(200);
     expect(response?.headers()["content-type"]).toBe("text/html; charset=utf-8");
-    expect(mainModule.status()).toBe(200);
-    expect(mainModule.headers()["content-type"]).toBe("text/javascript; charset=utf-8");
-    expect(mainModule.headers()["cache-control"]).toBe("no-store");
-    const transformedMain = await mainModule.text();
-    expect(transformedMain).toContain('from "/src/message.js"');
-    expect(transformedMain).not.toContain('from "./message"');
+    expect(entry.status()).toBe(200);
+    expect(entry.headers()["content-type"]).toBe("text/javascript; charset=utf-8");
+    expect(entry.headers()["cache-control"]).toBe("no-store");
+    const transformedEntry = await entry.text();
+    for (const expected of transformedIncludes) expect(transformedEntry).toContain(expected);
+    for (const unsupported of transformedExcludes) {
+      expect(transformedEntry).not.toContain(unsupported);
+    }
     expect(dependency.status()).toBe(200);
-    await expect(page.title()).resolves.toBe("rsvite M1 HTML");
-    await expect(page.textContent("#app")).resolves.toBe("served by Rust");
+    const transformedDependency = await dependency.text();
+    for (const unsupported of dependencyExcludes) {
+      expect(transformedDependency).not.toContain(unsupported);
+    }
+    await expect(page.title()).resolves.toBe(title);
+    await expect(page.textContent("#app")).resolves.toBe(initialText);
     expect(errors).toEqual([]);
 
-    const messagePath = join(root, "src/message.js");
-    const first = await readFile(messagePath, "utf8");
-    await writeFile(messagePath, first.replace("served by Rust", "served by Rust again"));
+    const dependencyFile = join(root, dependencyPath);
+    const first = await readFile(dependencyFile, "utf8");
+    expect(first).toContain(initialText);
+    await writeFile(dependencyFile, first.replace(initialText, updatedText));
     const reloadedDependency = page.waitForResponse(
-      (candidate) => new URL(candidate.url()).pathname === "/src/message.js",
+      (candidate) => new URL(candidate.url()).pathname === dependencyPath,
     );
     await page.reload();
     expect((await reloadedDependency).status()).toBe(200);
-    await expect(page.textContent("#app")).resolves.toBe("served by Rust again");
+    await expect(page.textContent("#app")).resolves.toBe(updatedText);
     expect(errors).toEqual([]);
+
+    if (rejectedEntrySource !== undefined) {
+      await writeFile(join(root, entryPath), rejectedEntrySource);
+      const rejectedEntryResponse = page.waitForResponse(
+        (candidate) => new URL(candidate.url()).pathname === entryPath,
+      );
+      await page.reload();
+      expect((await rejectedEntryResponse).status()).toBe(400);
+      await expect(page.textContent("#app")).resolves.toBe("loading");
+    }
 
     child.kill("SIGTERM");
     await expect(exit).resolves.toEqual({ code: 0, signal: null });
@@ -190,4 +205,50 @@ test("pnpm's rsvite bin executes Rust-resolved modules, reloads a dependency, an
       await rm(root, { recursive: true, force: true });
     }
   }
+}
+
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  test(`the first readiness bytes already guarantee clean ${signal} shutdown`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "rsvite-m1-readiness-"));
+    await cp(resolve(htmlFixtureRoot, "index.html"), join(root, "index.html"));
+    try {
+      for (let trial = 0; trial < 10; trial += 1) {
+        await interruptOnFirstReadiness(root, signal);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+}
+
+test("pnpm's rsvite bin executes Rust-resolved modules, reloads a dependency, and shuts down", async () => {
+  await proveBrowserModuleFixture({
+    fixtureRoot: htmlFixtureRoot,
+    entryPath: "/src/main.js",
+    dependencyPath: "/src/message.js",
+    title: "rsvite M1 HTML",
+    initialText: "served by Rust",
+    updatedText: "served by Rust again",
+    transformedIncludes: ['from "/src/message.js"'],
+    transformedExcludes: ['from "./message"'],
+  });
+});
+
+test("pnpm's rsvite bin executes basic TypeScript and rejects retained class modifiers", async () => {
+  await proveBrowserModuleFixture({
+    fixtureRoot: typescriptFixtureRoot,
+    entryPath: "/src/main.ts",
+    dependencyPath: "/src/message.ts",
+    title: "rsvite M1 TypeScript",
+    initialText: "served by Rust TypeScript",
+    updatedText: "served by Rust TypeScript again",
+    transformedIncludes: ['from "/src/message.ts"'],
+    transformedExcludes: ['from "./message"', ": Element | null"],
+    dependencyExcludes: [": string"],
+    rejectedEntrySource: `import { message } from "./message";
+class Value { public text = message }
+const target: Element | null = document.querySelector("#app");
+if (target !== null) target.textContent = new Value().text;
+`,
+  });
 });
