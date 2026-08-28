@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -10,6 +10,7 @@ import {
   runCompatibilityCheck,
   type BrowserAdapter,
   type BrowserPage,
+  type HmrUpdate,
   type RunEnvironment,
   type RunReport,
 } from "@rsvite/compatibility-runner";
@@ -303,17 +304,8 @@ export function createElkBrowserAdapter(options: ElkBrowserAdapterOptions = {}):
   };
 }
 
-async function updateElk(
-  page: BrowserPage,
-  signal: AbortSignal,
-  projectRoot: string,
-): Promise<void> {
-  const source = join(projectRoot, ELK_HMR_STYLESHEET);
-  const original = await readFile(source, "utf8");
-  if (!original.includes(ELK_HMR_FIND)) {
-    throw new Error(`ELK HMR stylesheet does not contain the declared find text`);
-  }
-  await writeFile(source, original.replace(ELK_HMR_FIND, ELK_HMR_REPLACE));
+async function updateElk(page: BrowserPage, signal: AbortSignal, hmr: HmrUpdate): Promise<void> {
+  await hmr.apply();
   await sleep(PAGE_SETTLE_MS, signal);
   await waitForExpression(
     page,
@@ -321,14 +313,6 @@ async function updateElk(
     signal,
     "the mocked /home timeline after the Vite update",
   );
-}
-
-async function restoreElkStylesheet(projectRoot: string): Promise<void> {
-  const source = join(projectRoot, ELK_HMR_STYLESHEET);
-  if (!existsSync(source)) return;
-  const current = await readFile(source, "utf8");
-  if (!current.includes(ELK_HMR_REPLACE)) return;
-  await writeFile(source, current.replace(ELK_HMR_REPLACE, ELK_HMR_FIND));
 }
 
 async function wipeViteOptimizerCache(projectRoot: string): Promise<void> {
@@ -462,40 +446,35 @@ function runEnvironmentForLifecycle(
     });
     const browser = lifecycle === "build" ? undefined : createElkBrowserAdapter();
     const viteVersion = readInstalledVersion(projectRoot, "vite");
-    let report: RunReport;
-    try {
-      report = await runCompatibilityCheck({
-        manifest,
-        entryId: ELK_ENTRY_ID,
-        lifecycle,
-        subject: {
-          name: subject,
-          version:
-            subject === "vite"
-              ? (viteVersion ?? readInstalledVersion(projectRoot, "vite") ?? "unknown")
-              : "workspace-unavailable",
-        },
-        environment,
-        projectRoot,
-        artifactRoot,
-        origin: lifecycle === "build" ? undefined : `http://127.0.0.1:${String(port)}`,
-        declared: declaredElkRun(subject, lifecycle),
-        ...(browser ? { browser } : {}),
-        ...(lifecycle === "dev" && subject === "vite"
-          ? {
-              update: (page: BrowserPage, signal: AbortSignal) =>
-                updateElk(page, signal, projectRoot),
-            }
-          : {}),
-        timeouts: {
-          installMs: INSTALL_TIMEOUT_MS,
-          lifecycleMs: LIFECYCLE_TIMEOUT_MS,
-          browserMs: BROWSER_TIMEOUT_MS,
-        },
-      });
-    } finally {
-      await restoreElkStylesheet(projectRoot);
-    }
+    const report = await runCompatibilityCheck({
+      manifest,
+      entryId: ELK_ENTRY_ID,
+      lifecycle,
+      subject: {
+        name: subject,
+        version:
+          subject === "vite"
+            ? (viteVersion ?? readInstalledVersion(projectRoot, "vite") ?? "unknown")
+            : "workspace-unavailable",
+      },
+      environment,
+      projectRoot,
+      artifactRoot,
+      origin: lifecycle === "build" ? undefined : `http://127.0.0.1:${String(port)}`,
+      declared: declaredElkRun(subject, lifecycle),
+      ...(browser ? { browser } : {}),
+      ...(lifecycle === "dev" && subject === "vite"
+        ? {
+            update: (page: BrowserPage, signal: AbortSignal, hmr: HmrUpdate) =>
+              updateElk(page, signal, hmr),
+          }
+        : {}),
+      timeouts: {
+        installMs: INSTALL_TIMEOUT_MS,
+        lifecycleMs: LIFECYCLE_TIMEOUT_MS,
+        browserMs: BROWSER_TIMEOUT_MS,
+      },
+    });
     const measuredVite = readInstalledVersion(projectRoot, "vite") ?? viteVersion;
     annotateElkResult(report, manifest, {
       ...(measuredVite !== undefined ? { viteVersion: measuredVite } : {}),

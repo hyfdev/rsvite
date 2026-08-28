@@ -9,7 +9,7 @@
 //
 // The pinned checkout's own Chromium is started once before the baseline, and installed through
 // the project's own Playwright if it is not there yet. See ../README.md.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LifecycleName, RunEnvironment } from "@rsvite/compatibility-runner";
@@ -159,8 +159,6 @@ async function recordViteBuild(): Promise<Recording> {
 /** The development baseline: the project's own server, its own spec against it, then one update. */
 async function recordViteDev(browserVersion: string): Promise<Recording> {
   const { publishRoot, stagingRoot } = roots("vite", "dev");
-  const editPath = join(checkout, pin.sentinelEditPath);
-  const original = readFileSync(editPath, "utf8");
 
   return record({
     checkoutRoot: checkout,
@@ -178,7 +176,7 @@ async function recordViteDev(browserVersion: string): Promise<Recording> {
     origin: devOrigin(pin),
     browser: createPlaywrightBrowser(checkout),
     verifyInputs,
-    update: async (page, signal) => {
+    update: async (page, signal, hmr) => {
       // The project's own acceptance first: an update measured against a server the application
       // never worked on would be measuring nothing.
       await runUpstreamOrThrow(
@@ -193,12 +191,11 @@ async function recordViteDev(browserVersion: string): Promise<Recording> {
         },
         signal,
       );
-      // Then one source edit, which the development server is expected to patch into the running
-      // document rather than replace it.
-      writeFileSync(editPath, original.replace(pin.sentinelEdit.find, pin.sentinelEdit.replace));
-      await waitForText(page, pin.sentinelEdit.expectedText, signal);
+      // Then the exact manifest-declared source edit, which the development server is expected to
+      // patch into the running document rather than replace it.
+      await hmr.apply();
+      await waitForText(page, hmr.expectedText, signal);
     },
-    restore: () => Promise.resolve(writeFileSync(editPath, original)),
     timeouts: { installMs: INSTALL_MS, lifecycleMs: DEV_MS, browserMs: 600_000 },
   });
 }

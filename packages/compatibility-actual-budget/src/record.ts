@@ -6,6 +6,7 @@ import {
   type BrowserPage,
   type CommandSpec,
   type DeclaredRunInputs,
+  type HmrUpdate,
   type LifecycleName,
   type RunEnvironment,
   type RunFailure,
@@ -60,7 +61,7 @@ export interface RecordRequest {
   readonly timeouts: RunRequest["timeouts"];
   readonly origin?: string;
   readonly browser?: BrowserAdapter;
-  readonly update?: (page: BrowserPage, signal: AbortSignal) => Promise<void>;
+  readonly update?: (page: BrowserPage, signal: AbortSignal, hmr: HmrUpdate) => Promise<void>;
   /**
    * Everything this recording holds fixed: the pinned checkout, and any input that lives inside
    * it but outside its history. Raises when one of them is not what the corpus records. It runs

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createContractValidators } from "@rsvite/compatibility-contract";
-import { runCommand, type BrowserEvent, type BrowserPage } from "@rsvite/compatibility-runner";
+import {
+  runCommand,
+  type BrowserEvent,
+  type BrowserPage,
+  type HmrUpdate,
+} from "@rsvite/compatibility-runner";
 import { test } from "vite-plus/test";
 import {
   DRAWDB_HMR_STYLESHEET_PATH,
@@ -298,26 +300,29 @@ class DrawDbHmrPage implements BrowserPage {
   async close(): Promise<void> {}
 }
 
-test("the deterministic DrawDB HMR seam restores the stylesheet after two updates", async () => {
-  const projectRoot = await mkdtemp(join(tmpdir(), "rsvite-drawdb-hmr-"));
-  const stylesheet = join(projectRoot, "src", "index.css");
-  const original = '@import "tailwindcss";\n';
-  try {
-    await mkdir(join(projectRoot, "src"));
-    await writeFile(stylesheet, original);
-    const page = new DrawDbHmrPage();
+test("the deterministic DrawDB HMR seam uses the declared edit and observes its restoration", async () => {
+  const page = new DrawDbHmrPage();
+  let applies = 0;
+  let restores = 0;
+  const hmr: HmrUpdate = {
+    expectedText: "Add table",
+    async apply() {
+      applies += 1;
+    },
+    async restore() {
+      restores += 1;
+    },
+  };
 
-    await updateDrawDbStylesheet(page, new AbortController().signal, projectRoot);
+  await updateDrawDbStylesheet(page, new AbortController().signal, hmr);
 
-    assert.equal(await readFile(stylesheet, "utf8"), original);
-    assert.deepEqual(page.hmrExpressions, [
-      `globalThis.${DRAWDB_HMR_UPDATE_COUNTER} > 0`,
-      `globalThis.${DRAWDB_HMR_UPDATE_COUNTER} > 2`,
-    ]);
-    assert.equal(page.stylesheetExpressions.length, 2);
-    assert.match(page.stylesheetExpressions[0], /"active"/);
-    assert.match(page.stylesheetExpressions[1], /=== ""/);
-  } finally {
-    await rm(projectRoot, { force: true, recursive: true });
-  }
+  assert.equal(applies, 1);
+  assert.equal(restores, 1);
+  assert.deepEqual(page.hmrExpressions, [
+    `globalThis.${DRAWDB_HMR_UPDATE_COUNTER} > 0`,
+    `globalThis.${DRAWDB_HMR_UPDATE_COUNTER} > 2`,
+  ]);
+  assert.equal(page.stylesheetExpressions.length, 2);
+  assert.match(page.stylesheetExpressions[0], /"active"/);
+  assert.match(page.stylesheetExpressions[1], /=== ""/);
 });

@@ -249,6 +249,27 @@ test("an input that only serves an HTML entry can say so", () => {
   assertAccepted("html-entry-slice.json", validators.validateCorpusManifest(manifest));
 });
 
+test("v1 requires the declared HMR edit and expected text as runner inputs", () => {
+  const manifest = readExample("corpus-manifest/valid/mixed-corpus.json") as {
+    entries: { browserAcceptance?: { hmr?: Record<string, unknown> } }[];
+  };
+  const withoutEdit = structuredClone(manifest);
+  const withoutExpectedText = structuredClone(manifest);
+  delete withoutEdit.entries[0]?.browserAcceptance?.hmr?.["edit"];
+  delete withoutExpectedText.entries[0]?.browserAcceptance?.hmr?.["expectedText"];
+
+  assertRejectedWith(
+    "HMR acceptance without edit",
+    validators.validateCorpusManifest(withoutEdit),
+    "must have required property 'edit'",
+  );
+  assertRejectedWith(
+    "HMR acceptance without expectedText",
+    validators.validateCorpusManifest(withoutExpectedText),
+    "must have required property 'expectedText'",
+  );
+});
+
 test("a document from the wrong side of the contract is rejected", () => {
   const manifest = readExample("corpus-manifest/valid/mixed-corpus.json");
   const rawResult = readExample("raw-result/valid/vite-baseline-pass.json");
