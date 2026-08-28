@@ -9,7 +9,8 @@ use std::path::Path;
 use percent_encoding::percent_decode_str;
 
 use crate::project_file::{
-    ProjectFileError, ProjectFileErrorKind, decode_path_strictly, resolve_decoded_request_file,
+    ProjectFileError, ProjectFileErrorKind, decode_path_strictly, has_extension,
+    resolve_decoded_request_file,
 };
 
 /// A resource kind this server answers directly.
@@ -32,6 +33,17 @@ const RESOURCE_KINDS: &[ResourceKind] = &[
         subject: "asset",
     },
 ];
+
+/// The extension this server would answer a file by, or nothing if it answers none.
+///
+/// The served surface is expressed once, in [`RESOURCE_KINDS`]; anything that needs to know which
+/// files those are asks here rather than repeating the list.
+pub(crate) fn served_extension_of(path: &Path) -> Option<&'static str> {
+    RESOURCE_KINDS
+        .iter()
+        .map(|kind| kind.extension)
+        .find(|extension| has_extension(path, &[extension]))
+}
 
 /// The kind a request path asks for, or nothing if this server does not answer that extension.
 ///
