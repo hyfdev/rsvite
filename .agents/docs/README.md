@@ -11,6 +11,8 @@ These records hold rsvite's adopted product direction and the constraints that g
   <!-- Author: rsvite-lead -->
 - The pinned Vite HTML E2E slice is under `corpus/vite-upstream/`; provenance and the `vite-upstream-e2e` manifest entry are owned by `@rsvite/compatibility-vite-upstream`.
   <!-- Author: rsvite-senior-engineer-2 -->
+- The pinned Actual Budget gate is the `actual-budget` corpus entry for a real project; adapter and results are owned by `@rsvite/compatibility-actual-budget`. The project source and translations checkout stay external; its [README](../../packages/compatibility-actual-budget/README.md) defines the supported recording contract.
+  <!-- Author: rsvite-engineer -->
 - The pinned ELK Vue/Nuxt gate is the `elk` real-project entry; adapter, license copy, and results are owned by `@rsvite/compatibility-elk`. ELK source stays external.
   <!-- Author: rsvite-senior-engineer-2 -->
 - Read [gotchas.md](gotchas.md) before recording evidence or trusting a passing run: traps already paid for that no test locks.
