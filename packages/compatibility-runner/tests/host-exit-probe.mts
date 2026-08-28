@@ -1,12 +1,10 @@
-// Run as a subprocess: performs one fast successful check with generous budgets and exits.
-// If a losing timer is left alive, this process stays up until that timer fires, which is what
-// the regression test measures. Active-handle inspection cannot see such a timer on Node 24.
+// Run as a subprocess: one fast successful check must leave the active Timeout count unchanged.
 import { mkdtemp } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runCompatibilityCheck } from "../src/index.ts";
+import { runCompatibilityCheck, type RunRequest } from "../src/index.ts";
 
 const fixturesDir = fileURLToPath(new URL("../fixtures/", import.meta.url));
 
@@ -45,7 +43,7 @@ const manifest = {
   ],
 };
 
-const report = await runCompatibilityCheck({
+const request: RunRequest = {
   manifest,
   entryId: "synthetic-orchestration",
   lifecycle: "dev",
@@ -66,7 +64,21 @@ const report = await runCompatibilityCheck({
     explicitFallbacks: [],
     classifyFailure: () => ({ kind: "current-compatibility-requirement", evidence: "probe" }),
   },
-  timeouts: { installMs: 2_000, lifecycleMs: 2_000, browserMs: 2_000 },
-});
+  timeouts: { installMs: 2_000, lifecycleMs: 60_000, browserMs: 60_000 },
+};
 
-console.log((report.result as { outcome: string }).outcome);
+const initialTimeouts = process
+  .getActiveResourcesInfo()
+  .filter((resource) => resource === "Timeout");
+const report = await runCompatibilityCheck(request);
+
+const remainingTimeouts = process
+  .getActiveResourcesInfo()
+  .filter((resource) => resource === "Timeout");
+if (remainingTimeouts.length !== initialTimeouts.length) {
+  throw new Error(
+    `the run left ${String(remainingTimeouts.length - initialTimeouts.length)} timer(s) active`,
+  );
+}
+
+console.log(JSON.stringify({ outcome: (report.result as { outcome: string }).outcome }));
