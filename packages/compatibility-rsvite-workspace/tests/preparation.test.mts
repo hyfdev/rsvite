@@ -1,39 +1,38 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "vite-plus/test";
+import { afterAll, test } from "vite-plus/test";
 import { prepareRsviteWorkspace } from "../src/index.ts";
-import { recordingBuild, workspaceFixture } from "./support.mts";
+import {
+  cleanUpFixtures,
+  trackTemporary,
+  withSupportedBuild,
+  workspaceFixture,
+} from "./support.mts";
 
-/** What a real native build leaves behind. */
-function buildOutputs(root: string, options: { loader?: boolean; binary?: boolean } = {}): void {
-  const dir = join(root, "packages/rsvite");
-  if (options.loader !== false)
-    writeFileSync(join(dir, "native.js"), "export class DevServer {}\n");
-  if (options.binary !== false) writeFileSync(join(dir, "rsvite.linux-x64-gnu.node"), "\0binary\n");
-}
+afterAll(cleanUpFixtures);
 
-test("preparation returns this checkout's own command, absolute", () => {
+/** What a real native build leaves behind on this host. */
+const OUTPUTS = `printf 'export class DevServer {}\\n' > packages/rsvite/native.js
+printf '\\0binary\\n' > packages/rsvite/rsvite.${process.platform}-${process.arch}-gnu.node`;
+
+test("preparation runs the supported build and returns this checkout's own command", () => {
   const workspace = workspaceFixture();
-  const build = recordingBuild();
+  const build = withSupportedBuild(workspace.root, OUTPUTS);
 
-  const prepared = prepareRsviteWorkspace(workspace.root, {
-    build: (root) => {
-      build.build(root);
-      buildOutputs(root);
-    },
-  });
+  const prepared = prepareRsviteWorkspace(workspace.root);
 
   assert.equal(prepared.subject.commit, workspace.owner);
   assert.equal(prepared.executable, join(workspace.root, "packages/rsvite/bin/rsvite.js"));
-  assert.equal(build.calls(), 1);
+  // The supported task, uncached — not a build the caller chose.
+  assert.deepEqual(build.argv(), ["run", "--no-cache", "build:rsvite:native"]);
 });
 
 test("a same-named command on the host cannot stand in for the workspace command", () => {
   const workspace = workspaceFixture();
-  // A decoy exactly where a host lookup would find one first.
-  const hostBin = mkdtempSync(join(tmpdir(), "rsvite-host-bin-"));
+  withSupportedBuild(workspace.root, OUTPUTS);
+  const hostBin = trackTemporary(mkdtempSync(join(tmpdir(), "rsvite-host-bin-")));
   const decoy = join(hostBin, "rsvite");
   writeFileSync(decoy, "#!/bin/sh\necho host\n");
   chmodSync(decoy, 0o755);
@@ -41,9 +40,10 @@ test("a same-named command on the host cannot stand in for the workspace command
   process.env["PATH"] = `${hostBin}:${previousPath ?? ""}`;
 
   try {
-    const prepared = prepareRsviteWorkspace(workspace.root, { build: buildOutputs });
-    assert.equal(prepared.executable, join(workspace.root, "packages/rsvite/bin/rsvite.js"));
-    assert.notEqual(prepared.executable, decoy);
+    assert.equal(
+      prepareRsviteWorkspace(workspace.root).executable,
+      join(workspace.root, "packages/rsvite/bin/rsvite.js"),
+    );
   } finally {
     if (previousPath === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previousPath;
@@ -52,100 +52,129 @@ test("a same-named command on the host cannot stand in for the workspace command
 
 test("identity is settled before the build runs", () => {
   const workspace = workspaceFixture();
+  const build = withSupportedBuild(workspace.root, OUTPUTS);
   workspace.git("checkout", "--quiet", "-b", "topic");
   workspace.write("crates/rsvite_core/src/lib.rs", "pub fn serve() { /* changed */ }\n");
   workspace.commit("feat: change the product on a branch");
-  const build = recordingBuild();
 
-  assert.throws(
-    () => prepareRsviteWorkspace(workspace.root, { build: build.build }),
-    /but protected main's is/,
-  );
-  assert.equal(
-    build.calls(),
-    0,
+  assert.throws(() => prepareRsviteWorkspace(workspace.root), /but protected main's is/);
+  assert.deepEqual(
+    build.argv(),
+    [],
     "the native build ran against a source this checkout could not name",
   );
 });
 
-test("a failing native build is reported as a build failure, not as a missing file", () => {
+test("a build that changes the product source is caught before its output is accepted", () => {
   const workspace = workspaceFixture();
+  withSupportedBuild(
+    workspace.root,
+    `${OUTPUTS}\nprintf '// changed by the build\\n' > packages/rsvite/bin/rsvite.js`,
+  );
 
   assert.throws(
-    () =>
-      prepareRsviteWorkspace(workspace.root, {
-        build: () => {
-          throw new Error("cargo exited with code 101");
-        },
-      }),
-    /cargo exited with code 101/,
+    () => prepareRsviteWorkspace(workspace.root),
+    /differs from .* at packages\/rsvite\/bin\/rsvite\.js/,
+    "a build rewrote tracked product source and the preflight still accepted it",
   );
 });
 
-test("a build that produces no loader, or no platform binary, is refused", () => {
-  const missingLoader = workspaceFixture();
+test("a failing native build is reported, and nothing is accepted after it", () => {
+  const workspace = workspaceFixture();
+  withSupportedBuild(workspace.root, `echo "cargo exited with code 101" >&2\nexit 101`);
+
+  assert.throws(() => prepareRsviteWorkspace(workspace.root), /Command failed|exited/);
+});
+
+test("a directory cannot impersonate the loader or the platform binary", () => {
+  const loader = workspaceFixture();
+  withSupportedBuild(
+    loader.root,
+    `mkdir -p packages/rsvite/native.js\nprintf '\\0\\n' > packages/rsvite/rsvite.${process.platform}-${process.arch}-gnu.node`,
+  );
   assert.throws(
-    () =>
-      prepareRsviteWorkspace(missingLoader.root, {
-        build: (root) => buildOutputs(root, { loader: false }),
-      }),
-    /produced no native\.js/,
+    () => prepareRsviteWorkspace(loader.root),
+    /native\.js loader is not a regular file/,
   );
 
-  const missingBinary = workspaceFixture();
+  const binary = workspaceFixture();
+  withSupportedBuild(
+    binary.root,
+    `printf 'x\\n' > packages/rsvite/native.js\nmkdir -p packages/rsvite/rsvite.${process.platform}-${process.arch}-gnu.node`,
+  );
+  assert.throws(() => prepareRsviteWorkspace(binary.root), /is not a regular file/);
+});
+
+test("a binary built for another platform is not accepted as this host's", () => {
+  const workspace = workspaceFixture();
+  withSupportedBuild(
+    workspace.root,
+    `printf 'x\\n' > packages/rsvite/native.js\nprintf '\\0\\n' > packages/rsvite/rsvite.aix-ppc64.node`,
+  );
+
   assert.throws(
-    () =>
-      prepareRsviteWorkspace(missingBinary.root, {
-        build: (root) => buildOutputs(root, { binary: false }),
-      }),
-    /produced no platform binary/,
+    () => prepareRsviteWorkspace(workspace.root),
+    new RegExp(`produced no rsvite\\.${process.platform}-${process.arch}\\*\\.node`),
   );
 });
 
-test("a package that declares no rsvite command, or whose command is gone, is refused", () => {
-  const undeclared = workspaceFixture();
-  undeclared.write(
+test("a loader that links out to a host file is refused", () => {
+  const outside = trackTemporary(mkdtempSync(join(tmpdir(), "rsvite-host-")));
+  writeFileSync(join(outside, "native.js"), "export class DevServer {}\n");
+
+  const workspace = workspaceFixture();
+  withSupportedBuild(
+    workspace.root,
+    `ln -s ${JSON.stringify(join(outside, "native.js"))} packages/rsvite/native.js\nprintf '\\0\\n' > packages/rsvite/rsvite.${process.platform}-${process.arch}-gnu.node`,
+  );
+
+  assert.throws(() => prepareRsviteWorkspace(workspace.root), /resolves outside packages\/rsvite/);
+});
+
+test("a committed command that links out to a host file is refused", () => {
+  const outside = trackTemporary(mkdtempSync(join(tmpdir(), "rsvite-host-")));
+  writeFileSync(join(outside, "rsvite.js"), "#!/usr/bin/env node\n");
+  chmodSync(join(outside, "rsvite.js"), 0o755);
+
+  // Committed, so the source check has nothing to object to: the escape is the repository's own
+  // recorded state, and only the containment rule can catch it.
+  const workspace = workspaceFixture();
+  rmSync(join(workspace.root, "packages/rsvite/bin/rsvite.js"));
+  symlinkSync(join(outside, "rsvite.js"), join(workspace.root, "packages/rsvite/bin/rsvite.js"));
+  workspace.commit("chore: link the command out of the package");
+  workspace.publish();
+  withSupportedBuild(workspace.root, OUTPUTS);
+
+  assert.throws(
+    () => prepareRsviteWorkspace(workspace.root),
+    /rsvite command resolves outside packages\/rsvite/,
+    "a command linked out to a host file was accepted as this checkout's",
+  );
+});
+
+test("a committed command that cannot be executed is refused rather than returned", () => {
+  const workspace = workspaceFixture();
+  chmodSync(join(workspace.root, "packages/rsvite/bin/rsvite.js"), 0o644);
+  workspace.commit("chore: drop the executable bit");
+  workspace.publish();
+  withSupportedBuild(workspace.root, OUTPUTS);
+
+  assert.throws(
+    () => prepareRsviteWorkspace(workspace.root),
+    /rsvite command is not executable/,
+    "a command the host cannot run was handed back as the subject",
+  );
+});
+
+test("a package that declares no rsvite command is refused", () => {
+  const workspace = workspaceFixture();
+  workspace.write(
     "packages/rsvite/package.json",
     `${JSON.stringify({ name: "rsvite", version: "0.0.0" }, null, 2)}\n`,
   );
-  undeclared.commit("chore: drop the bin entry");
-  undeclared.publish();
-  assert.throws(
-    () => prepareRsviteWorkspace(undeclared.root, { build: buildOutputs }),
-    /declares no rsvite command/,
-  );
-
-  const missing = workspaceFixture();
-  assert.throws(
-    () =>
-      prepareRsviteWorkspace(missing.root, {
-        build: (root) => {
-          buildOutputs(root);
-          rmSync(join(root, "packages/rsvite/bin/rsvite.js"));
-        },
-      }),
-    /the rsvite command is missing/,
-  );
-});
-
-test("a command pointed outside the workspace package is refused", () => {
-  const workspace = workspaceFixture();
-  const outside = mkdtempSync(join(tmpdir(), "rsvite-outside-"));
-  mkdirSync(join(outside, "bin"), { recursive: true });
-  writeFileSync(join(outside, "bin/rsvite.js"), "#!/usr/bin/env node\n");
-  workspace.write(
-    "packages/rsvite/package.json",
-    `${JSON.stringify(
-      { name: "rsvite", version: "0.0.0", bin: { rsvite: join(outside, "bin/rsvite.js") } },
-      null,
-      2,
-    )}\n`,
-  );
-  workspace.commit("chore: point the command outside the package");
+  workspace.commit("chore: drop the bin entry");
   workspace.publish();
+  withSupportedBuild(workspace.root, OUTPUTS);
 
-  assert.throws(
-    () => prepareRsviteWorkspace(workspace.root, { build: buildOutputs }),
-    /must live inside packages\/rsvite/,
-  );
+  assert.throws(() => prepareRsviteWorkspace(workspace.root), /declares no rsvite command/);
 });

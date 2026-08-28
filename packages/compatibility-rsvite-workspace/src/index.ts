@@ -1,6 +1,14 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import {
+  accessSync,
+  constants,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+} from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
@@ -36,14 +44,24 @@ export interface RsviteWorkspaceSubject {
 }
 
 function git(root: string, args: readonly string[], what: string): string {
-  const result = spawnSync("git", [...args], { cwd: root, encoding: "utf8" });
+  const result = spawnSync("git", [...args], {
+    cwd: root,
+    encoding: "buffer",
+    maxBuffer: 64 * 1024 * 1024,
+  });
   if (result.error !== undefined || result.status === null) {
     throw new Error(`cannot ${what}: ${String(result.error ?? "git did not run")}`);
   }
   if (result.status !== 0) {
-    throw new Error(
-      `cannot ${what}: ${result.stderr.trim() || `git exited ${String(result.status)}`}`,
-    );
+    throw new Error(`cannot ${what}: ${result.stderr.toString().trim() || "git failed"}`);
+  }
+  return result.stdout.toString();
+}
+
+function gitBytes(root: string, args: readonly string[], what: string): Buffer {
+  const result = spawnSync("git", [...args], { cwd: root, maxBuffer: 512 * 1024 * 1024 });
+  if (result.error !== undefined || result.status !== 0) {
+    throw new Error(`cannot ${what}`);
   }
   return result.stdout;
 }
@@ -73,13 +91,102 @@ function ownerOf(root: string, ref: string, what: string): string {
 }
 
 /**
+ * Rejects a working tree that told git to stop looking at product source.
+ *
+ * `assume-unchanged` and `skip-worktree` are honoured by `git status` and by `git diff` alike, so
+ * a file carrying either flag can be edited and still report as pristine to both. Every check
+ * below reads the file itself, but a flag that makes git lie about the product is a fact about
+ * this checkout that a recording must refuse rather than work around.
+ */
+function assertNoHiddenIndexFlags(root: string): void {
+  const listed = git(
+    root,
+    ["ls-files", "-v", "--", ...RSVITE_PRODUCT_SOURCE_PATHS],
+    "list the rsvite product source",
+  );
+  const hidden = listed
+    .split("\n")
+    .filter((line) => /^[a-z]/.test(line) || line.startsWith("S"))
+    .map((line) => line.slice(2));
+  if (hidden.length > 0) {
+    throw new Error(
+      `the rsvite product source has assume-unchanged or skip-worktree set, so git cannot report its state: ${hidden
+        .slice(0, 3)
+        .join(", ")}`,
+    );
+  }
+}
+
+/**
+ * Compares the working tree against the owner's blobs directly.
+ *
+ * `git diff` consults the index, and the index is exactly what a hidden flag corrupts. Reading
+ * each blob and each file settles the question with the bytes themselves.
+ */
+function assertProductSourceMatches(root: string, owner: string): void {
+  assertNoHiddenIndexFlags(root);
+
+  // Modes matter as much as bytes: git records a symlink as a blob holding its target, and it
+  // records the executable bit, so comparing file contents alone would both misread a link and
+  // miss a permission change the owner never had.
+  const tracked = git(
+    root,
+    ["ls-tree", "-r", owner, "--", ...RSVITE_PRODUCT_SOURCE_PATHS],
+    `list the rsvite product source at ${owner}`,
+  )
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const [meta, path] = line.split("\t");
+      return { mode: (meta ?? "").split(" ")[0] ?? "", path: path ?? "" };
+    });
+  if (tracked.length === 0) {
+    throw new Error(`${owner} contains no rsvite product source`);
+  }
+
+  for (const { mode, path } of tracked) {
+    const expected = gitBytes(root, ["cat-file", "blob", `${owner}:${path}`], `read ${path}`);
+    const full = join(root, path);
+    let stat;
+    try {
+      stat = lstatSync(full);
+    } catch {
+      throw new Error(`the rsvite product source is missing ${path} from ${owner}`);
+    }
+
+    if (mode === "120000") {
+      if (!stat.isSymbolicLink() || readlinkSync(full) !== expected.toString()) {
+        throw new Error(`the rsvite product source differs from ${owner} at ${path}`);
+      }
+      continue;
+    }
+    if (stat.isSymbolicLink() || !stat.isFile() || !expected.equals(readFileSync(full))) {
+      throw new Error(`the rsvite product source differs from ${owner} at ${path}`);
+    }
+    const executable = (stat.mode & 0o111) !== 0;
+    if (executable !== (mode === "100755")) {
+      throw new Error(`the rsvite product source has a different mode from ${owner} at ${path}`);
+    }
+  }
+
+  const extra = git(
+    root,
+    ["status", "--porcelain=v1", "--untracked-files=all", "--", ...RSVITE_PRODUCT_SOURCE_PATHS],
+    "inspect the rsvite product source",
+  ).trim();
+  if (extra.length > 0) {
+    throw new Error(`the rsvite product source must be committed before recording:\n${extra}`);
+  }
+}
+
+/**
  * The commit protected main says owns the rsvite product source, proven to be the one this
  * checkout actually has.
  *
  * Three separate facts, in the order that makes a wrong answer impossible to mistake for a right
- * one: what main owns, that local history agrees, and that the working tree still matches it. A
- * stale branch fails the second; a branch that changed the product fails it too, because its own
- * newer commit becomes the local owner; uncommitted edits fail the third.
+ * one: what main owns, that local history agrees, and that the files on disk are that commit's
+ * bytes. A stale branch fails the second; a branch that changed the product fails it too, because
+ * its own newer commit becomes the local owner; an edited file fails the third.
  */
 export function resolveRsviteSourceOwner(root = defaultRepositoryRoot): string {
   requireProtectedRef(root);
@@ -91,24 +198,7 @@ export function resolveRsviteSourceOwner(root = defaultRepositoryRoot): string {
     );
   }
 
-  const dirty = git(
-    root,
-    ["status", "--porcelain=v1", "--untracked-files=all", "--", ...RSVITE_PRODUCT_SOURCE_PATHS],
-    "inspect the rsvite product source",
-  ).trim();
-  if (dirty.length > 0) {
-    throw new Error(`the rsvite product source must be committed before recording:\n${dirty}`);
-  }
-
-  const differs = spawnSync(
-    "git",
-    ["diff", "--quiet", protectedOwner, "--", ...RSVITE_PRODUCT_SOURCE_PATHS],
-    { cwd: root, encoding: "utf8" },
-  );
-  if (differs.status !== 0) {
-    throw new Error(`the rsvite product source differs from ${protectedOwner}`);
-  }
-
+  assertProductSourceMatches(root, protectedOwner);
   return protectedOwner;
 }
 
@@ -166,55 +256,81 @@ export function assertRsviteResultSubjectIsCurrent(
 
 export interface RsvitePreparation {
   readonly subject: RsviteWorkspaceSubject;
-  /** This checkout's own command. Absolute, and never resolved through PATH. */
+  /** This checkout's own command. Absolute, canonical, and never resolved through PATH. */
   readonly executable: string;
 }
 
-export interface PreparationOptions {
-  /**
-   * Runs the repository's supported native build without cache. Named so a test can drive the
-   * failure path without a real toolchain; the default is the task the repository declares.
-   */
-  readonly build?: (root: string) => void;
+/**
+ * Everything a recorder must know before it touches an external checkout or writes evidence.
+ *
+ * There is no way to supply a different build: the supported one is the only thing whose output
+ * this may accept, and a caller able to substitute it could record a subject the repository never
+ * produced. The order is the rest of the guarantee — identity is settled before the build runs,
+ * the source is proven again afterwards because the build is defined by files the product source
+ * deliberately excludes, and the command is resolved through this checkout's own package last, so
+ * a same-named executable on the host can never stand in for the thing being measured.
+ */
+export function prepareRsviteWorkspace(root = defaultRepositoryRoot): RsvitePreparation {
+  const subject = readRsviteWorkspaceSubject(root);
+  runSupportedNativeBuild(root);
+  // The build runs whatever root task orchestration says, and that orchestration is not product
+  // source, so a build is free to have changed the product under us.
+  assertProductSourceMatches(root, subject.commit);
+
+  const packageDir = realpathSync(join(root, RSVITE_PACKAGE_DIR));
+  requireContainedRegularFile(
+    packageDir,
+    join(packageDir, NATIVE_LOADER),
+    `the ${NATIVE_LOADER} loader`,
+  );
+  requirePlatformBinary(packageDir);
+
+  return { subject, executable: workspaceExecutable(packageDir) };
 }
 
-function defaultBuild(root: string): void {
+function runSupportedNativeBuild(root: string): void {
   execFileSync(join(root, "node_modules/.bin/vp"), ["run", "--no-cache", "build:rsvite:native"], {
     cwd: root,
     stdio: "inherit",
   });
 }
 
-/**
- * Everything a recorder must know before it touches an external checkout or writes evidence.
- *
- * The order is the point. Identity is settled first, so a build never runs against a source
- * nobody can name; the build runs before the outputs are required, so a missing binary is
- * reported as a build failure rather than as an absent file; and the command is resolved through
- * this checkout's own package last, so a same-named executable on the host can never stand in for
- * the thing being measured.
- */
-export function prepareRsviteWorkspace(
-  root = defaultRepositoryRoot,
-  options: PreparationOptions = {},
-): RsvitePreparation {
-  const subject = readRsviteWorkspaceSubject(root);
-  (options.build ?? defaultBuild)(root);
-
-  const packageDir = join(root, RSVITE_PACKAGE_DIR);
-  const loader = join(packageDir, NATIVE_LOADER);
-  if (!existsSync(loader)) {
-    throw new Error(`the native build produced no ${NATIVE_LOADER} in ${RSVITE_PACKAGE_DIR}`);
+/** A name that exists is not a file, and a path inside the package is not a file inside it. */
+function requireContainedRegularFile(packageDir: string, path: string, what: string): string {
+  let canonical: string;
+  try {
+    canonical = realpathSync(path);
+  } catch {
+    throw new Error(`${what} is missing from ${RSVITE_PACKAGE_DIR}`);
   }
-  const platformBinary = readdirSync(packageDir).find((entry) => entry.endsWith(".node"));
-  if (platformBinary === undefined) {
-    throw new Error(`the native build produced no platform binary in ${RSVITE_PACKAGE_DIR}`);
+  if (!canonical.startsWith(packageDir + sep)) {
+    throw new Error(`${what} resolves outside ${RSVITE_PACKAGE_DIR}: ${canonical}`);
   }
-
-  return { subject, executable: workspaceExecutable(packageDir) };
+  if (!lstatSync(canonical).isFile()) {
+    throw new Error(`${what} is not a regular file: ${canonical}`);
+  }
+  return canonical;
 }
 
-/** Resolved from the package's own `bin` entry, and required to stay inside that package. */
+/** The binary this host would actually load, not any `.node` the directory happens to hold. */
+function requirePlatformBinary(packageDir: string): string {
+  const expected = `rsvite.${process.platform}-${process.arch}`;
+  const candidates = readdirSync(packageDir).filter(
+    (entry) => entry.startsWith(`${expected}`) && entry.endsWith(".node"),
+  );
+  const name = candidates[0];
+  if (name === undefined) {
+    const seen = readdirSync(packageDir).filter((entry) => entry.endsWith(".node"));
+    throw new Error(
+      `the native build produced no ${expected}*.node in ${RSVITE_PACKAGE_DIR}${
+        seen.length > 0 ? `; it produced ${seen.join(", ")}` : ""
+      }`,
+    );
+  }
+  return requireContainedRegularFile(packageDir, join(packageDir, name), `the ${name} binary`);
+}
+
+/** Resolved from the package's own `bin` entry, required to stay inside it, and runnable. */
 function workspaceExecutable(packageDir: string): string {
   const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as {
     bin?: Record<string, unknown>;
@@ -224,12 +340,15 @@ function workspaceExecutable(packageDir: string): string {
     throw new Error(`${RSVITE_PACKAGE_DIR} declares no rsvite command`);
   }
 
-  const executable = resolve(packageDir, declared);
-  if (!isAbsolute(executable) || !executable.startsWith(packageDir + sep)) {
-    throw new Error(`the rsvite command must live inside ${RSVITE_PACKAGE_DIR}: ${executable}`);
-  }
-  if (!existsSync(executable)) {
-    throw new Error(`the rsvite command is missing: ${executable}`);
+  const executable = requireContainedRegularFile(
+    packageDir,
+    resolve(packageDir, declared),
+    "the rsvite command",
+  );
+  try {
+    accessSync(executable, constants.X_OK);
+  } catch {
+    throw new Error(`the rsvite command is not executable: ${executable}`);
   }
   return executable;
 }

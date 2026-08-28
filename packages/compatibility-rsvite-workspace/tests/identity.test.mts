@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "vite-plus/test";
+import { afterAll, test } from "vite-plus/test";
 import {
   assertRsviteResultSubjectIsCurrent,
   readRsviteWorkspaceSubject,
   resolveRsviteSourceOwner,
 } from "../src/index.ts";
-import { workspaceFixture } from "./support.mts";
+import { cleanUpFixtures, workspaceFixture } from "./support.mts";
+
+afterAll(cleanUpFixtures);
 
 test("the owner is what protected main says owns the product source", () => {
   const workspace = workspaceFixture();
@@ -171,5 +173,34 @@ test("a checkout that cannot see protected main says so, instead of guessing", (
     () => resolveRsviteSourceOwner(workspace.root),
     /has no refs\/remotes\/origin\/main/,
     "a checkout without protected main resolved an owner anyway",
+  );
+});
+
+test("a hidden index flag cannot make an edited product source look pristine", () => {
+  for (const flag of ["--assume-unchanged", "--skip-worktree"] as const) {
+    const workspace = workspaceFixture();
+    const tracked = "crates/rsvite_core/src/lib.rs";
+    workspace.git("update-index", flag, tracked);
+    writeFileSync(join(workspace.root, tracked), "pub fn serve() { /* edited in secret */ }\n");
+
+    // Both of git's own answers are now wrong about this file.
+    assert.equal(workspace.git("status", "--porcelain=v1", "--", tracked), "");
+    assert.equal(workspace.git("diff", "--name-only", "--", tracked), "");
+
+    assert.throws(
+      () => resolveRsviteSourceOwner(workspace.root),
+      /assume-unchanged or skip-worktree/,
+      `${flag} let an edited product source resolve as the protected owner`,
+    );
+  }
+});
+
+test("a product source file whose executable bit changed is not the owner's", () => {
+  const workspace = workspaceFixture();
+  chmodSync(join(workspace.root, "packages/rsvite/bin/rsvite.js"), 0o644);
+
+  assert.throws(
+    () => resolveRsviteSourceOwner(workspace.root),
+    /different mode from .* at packages\/rsvite\/bin\/rsvite\.js/,
   );
 });

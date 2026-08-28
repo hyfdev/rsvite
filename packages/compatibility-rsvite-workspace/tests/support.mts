@@ -1,7 +1,23 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+
+const created: string[] = [];
+
+/** Every temporary directory this module hands out, so a suite can remove them all. */
+export function trackTemporary(dir: string): string {
+  created.push(dir);
+  return dir;
+}
 
 export interface WorkspaceFixture {
   readonly root: string;
@@ -20,7 +36,7 @@ export interface WorkspaceFixture {
  * a statement about git and a description of git would not test it.
  */
 export function workspaceFixture(version = "0.0.0"): WorkspaceFixture {
-  const root = mkdtempSync(join(tmpdir(), "rsvite-workspace-"));
+  const root = trackTemporary(mkdtempSync(join(tmpdir(), "rsvite-workspace-")));
   const git = (...args: string[]): string =>
     execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
   const write = (path: string, body: string): void => {
@@ -44,6 +60,7 @@ export function workspaceFixture(version = "0.0.0"): WorkspaceFixture {
     `${JSON.stringify({ name: "rsvite", version, bin: { rsvite: "./bin/rsvite.js" } }, null, 2)}\n`,
   );
   write("packages/rsvite/bin/rsvite.js", "#!/usr/bin/env node\n");
+  chmodSync(join(root, "packages/rsvite/bin/rsvite.js"), 0o755);
   // Recording environment, not product source.
   write("vite.config.ts", "export default {};\n");
   write("packages/rsvite/tests/cli.test.mjs", "// test\n");
@@ -63,13 +80,25 @@ export function workspaceFixture(version = "0.0.0"): WorkspaceFixture {
   return { root, owner, git, write, commit, publish };
 }
 
-/** A build that records it ran, so a test can prove what happened before it. */
-export function recordingBuild(): { build: (root: string) => void; calls(): number } {
-  let calls = 0;
+/**
+ * Gives the fixture the repository's own build entry point, so a test drives the real public
+ * preparation — including the exact task it runs — rather than substituting a build of its own.
+ */
+export function withSupportedBuild(root: string, script: string): { argv(): string[] } {
+  const bin = join(root, "node_modules/.bin");
+  mkdirSync(bin, { recursive: true });
+  const argvLog = join(root, "node_modules/.bin/vp.argv");
+  writeFileSync(
+    join(bin, "vp"),
+    `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(argvLog)}\ncd ${JSON.stringify(root)}\n${script}\n`,
+  );
+  chmodSync(join(bin, "vp"), 0o755);
   return {
-    calls: () => calls,
-    build: () => {
-      calls += 1;
-    },
+    argv: () => (existsSync(argvLog) ? readFileSync(argvLog, "utf8").trim().split("\n") : []),
   };
+}
+
+/** Removes every temporary directory this module created. */
+export function cleanUpFixtures(): void {
+  for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
 }

@@ -224,12 +224,6 @@ export interface ProvenanceViolation {
   readonly message: string;
 }
 
-export interface RsviteWorkspaceSubject {
-  readonly name: "rsvite";
-  readonly version: string;
-  readonly commit: string;
-}
-
 export type ProvenanceCheck =
   | { readonly valid: true }
   | { readonly valid: false; readonly violations: readonly ProvenanceViolation[] };
@@ -240,7 +234,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-/** A workspace result names committed product source, never an uncommitted local build. */
 function posixRelative(from: string, to: string): string {
   return relative(from, to).split(sep).join("/");
 }
