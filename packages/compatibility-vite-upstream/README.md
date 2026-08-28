@@ -38,10 +38,13 @@ produced by install. The recorder runs the lockfile install, deletes `packages/v
 
 `vp run ready` validates the imported-file provenance and both committed results, then runs the
 unchanged selected test against the local rsvite build and vendored input. It does not clone,
-install, or record an external checkout. The recorder, committed-result check, and live daily probe
-share one whole-execution validator: the negative result is accepted only when the selected
-assertion is the complete failure. A green daily check preserves the Vite-pass/rsvite-fail
-comparison; it does not claim that the C0 rsvite slice supports the C2 case.
+install, or record an external checkout. The rsvite result's `subject.commit` remains the historical
+source that produced those artifacts. Daily validation reads the package metadata from that commit,
+requires the SHA itself to identify the product source, and requires it to remain in the current
+product-source ancestry. The recorder, committed-result check, and live current-product probe share
+one whole-execution validator: the negative result remains current only when the local build still
+produces the selected assertion as the complete failure. A green daily check preserves the
+Vite-pass/rsvite-fail comparison; it does not claim that the C0 rsvite slice supports the C2 case.
 
 The selected upstream test owns its Playwright browser inside the Vitest process. Contract v1
 records an empty runner `browserErrors` array because no events cross the runner adapter boundary.

@@ -242,6 +242,11 @@ export interface RsviteWorkspaceSubject {
   readonly commit: string;
 }
 
+interface RsvitePackageMetadata {
+  readonly name: "rsvite";
+  readonly version: string;
+}
+
 export type ProvenanceCheck =
   | { readonly valid: true }
   | { readonly valid: false; readonly violations: readonly ProvenanceViolation[] };
@@ -250,6 +255,18 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function parseRsvitePackageMetadata(value: unknown, source: string): RsvitePackageMetadata {
+  const record = asRecord(value);
+  if (record?.["name"] !== "rsvite") {
+    throw new Error(`${source} must declare package name rsvite`);
+  }
+  const version = record["version"];
+  if (typeof version !== "string" || version.length === 0) {
+    throw new Error(`${source} must declare a non-empty string version`);
+  }
+  return { name: "rsvite", version };
 }
 
 /** A workspace result names committed product source, never an uncommitted local build. */
@@ -262,14 +279,7 @@ export function readRsviteWorkspaceSubject(root = repoRoot): RsviteWorkspaceSubj
     throw new Error(`cannot read rsvite workspace metadata at ${packagePath}: ${String(error)}`);
   }
 
-  const record = asRecord(packageJson);
-  if (record?.["name"] !== "rsvite") {
-    throw new Error(`${packagePath} must declare package name rsvite`);
-  }
-  const version = record["version"];
-  if (typeof version !== "string" || version.length === 0) {
-    throw new Error(`${packagePath} must declare a non-empty string version`);
-  }
+  const { name, version } = parseRsvitePackageMetadata(packageJson, packagePath);
 
   let status: string;
   let commit: string;
@@ -296,20 +306,17 @@ export function readRsviteWorkspaceSubject(root = repoRoot): RsviteWorkspaceSubj
     throw new Error(`rsvite workspace has no committed product source: ${commit}`);
   }
 
-  return { name: "rsvite", version, commit };
+  return { name, version, commit };
 }
 
-/** A committed result remains current while only source outside the product build has changed. */
+/**
+ * `subject.commit` identifies and describes the product source that produced a committed result.
+ * The daily live replay establishes whether the current product has that outcome.
+ */
 export function assertRsviteWorkspaceSubjectMatches(subject: unknown, root = repoRoot): void {
   const current = readRsviteWorkspaceSubject(root);
   const recorded = asRecord(subject);
-  if (recorded?.["name"] !== current.name) {
-    throw new Error(`rsvite result subject name must be ${current.name}`);
-  }
-  if (recorded["version"] !== current.version) {
-    throw new Error(`rsvite result subject version must be ${current.version}`);
-  }
-  const commit = recorded["commit"];
+  const commit = recorded?.["commit"];
   if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) {
     throw new Error("rsvite result subject commit must be a 40-character lowercase Git SHA");
   }
@@ -325,15 +332,52 @@ export function assertRsviteWorkspaceSubjectMatches(subject: unknown, root = rep
   if (!gitSucceeds(["cat-file", "-e", `${commit}^{commit}`])) {
     throw new Error(`rsvite result subject commit does not exist in this checkout: ${commit}`);
   }
+
+  let packageJson: unknown;
+  try {
+    packageJson = JSON.parse(
+      execFileSync("git", ["show", `${commit}:packages/rsvite/package.json`], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    ) as unknown;
+  } catch (error) {
+    throw new Error(
+      `rsvite result subject commit does not contain valid package metadata: ${commit}: ${String(error)}`,
+    );
+  }
+  const historical = parseRsvitePackageMetadata(
+    packageJson,
+    `${commit}:packages/rsvite/package.json`,
+  );
+  if (recorded?.["name"] !== historical.name) {
+    throw new Error(`rsvite result subject name must be ${historical.name} at ${commit}`);
+  }
+  if (recorded?.["version"] !== historical.version) {
+    throw new Error(`rsvite result subject version must be ${historical.version} at ${commit}`);
+  }
+
+  let historicalSourceCommit: string;
+  try {
+    historicalSourceCommit = execFileSync(
+      "git",
+      ["log", "-1", "--format=%H", commit, "--", ...rsviteWorkspaceSourcePaths],
+      { cwd: root, encoding: "utf8" },
+    ).trim();
+  } catch (error) {
+    throw new Error(`cannot inspect historical rsvite product source: ${String(error)}`);
+  }
+  if (historicalSourceCommit !== commit) {
+    throw new Error(
+      `rsvite result subject commit is not an rsvite product-source commit: ${commit}`,
+    );
+  }
+
   if (!gitSucceeds(["merge-base", "--is-ancestor", commit, current.commit])) {
     throw new Error(
       `rsvite result subject commit is not an ancestor of the current workspace: ${commit}`,
     );
-  }
-  if (
-    !gitSucceeds(["diff", "--quiet", commit, current.commit, "--", ...rsviteWorkspaceSourcePaths])
-  ) {
-    throw new Error(`rsvite product source differs from recorded subject commit ${commit}`);
   }
 }
 

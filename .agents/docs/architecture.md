@@ -1,7 +1,7 @@
 # Architecture
 
-rsvite has a fixed product entry and execution-ownership rule. The first M1 slice below also fixes its Node/N-API/Rust process boundary and native server lifecycle. Plugin and runtime JavaScript placement, the cross-language callback protocol, the module graph implementation, and later capability internals remain open until implementation evidence selects them.
-<!-- Author: rsvite-lead -->
+rsvite has a fixed product entry and execution-ownership rule. The first M1 slice below also fixes its Node/N-API/Rust process boundary and native server lifecycle; the local JavaScript slice fixes the first Rust-owned module request and graph path. Plugin and runtime JavaScript placement, the cross-language callback protocol, the graph required for watching and HMR, and later capability internals remain open until implementation evidence selects them.
+<!-- Author: rsvite-architect -->
 
 ## Fixed product boundary
 
@@ -32,11 +32,11 @@ rsvite has a fixed product entry and execution-ownership rule. The first M1 slic
 The first implementation PR makes `pnpm exec rsvite fixtures/m1-basic-html` start a development server and render that fixture's `index.html` in a browser. This is the smallest durable user path: Vite treats a root `index.html` as the entry served at `/`, while a health endpoint or generated page would prove only that native code can answer a request. The package follows Vite's `vite [root]` command shape, binds to `127.0.0.1`, and supports only the positional root plus `--port` in this slice.
 <!-- Author: rsvite-lead -->
 
-The fixture contains one `index.html` with the title `rsvite M1 HTML` and one element `<h1 id="app">served by Rust</h1>`. It contains no configuration file, package dependency, plugin, script, stylesheet, or asset. The server handles `GET /` by reading `<root>/index.html` in Rust for each request and returning its bytes as `text/html; charset=utf-8`. Other paths return `404`, and other methods return `405`; neither response enters JavaScript.
-<!-- Author: rsvite-lead -->
+The no-config fixture contains `index.html`, `/src/main.js`, and `/src/message.js`; it has no configuration file, package dependency, plugin, stylesheet, or asset. The Rust server handles `GET /` by reading `<root>/index.html` and returning its bytes as `text/html; charset=utf-8`. It handles project-contained `.js` requests through the [local JavaScript path](#m1-local-javascript-import-slice), returns `404` for unknown paths, and returns `405` for methods other than `GET`.
+<!-- Author: rsvite-architect -->
 
-Reading the file per request lets a manual browser reload observe an edit without adding a cache or watcher. Automatic reload, HMR, HTML transformation, JavaScript or TypeScript transformation, CSS, assets, module resolution, file watching, build, and preview remain unsupported. Those capabilities extend this boundary in later M1 leaves; they are not acceptance criteria for the first implementation PR.
-<!-- Author: rsvite-lead -->
+Rust reads HTML and JavaScript source again for each request, so a manual browser reload observes an edit without a cache or watcher. Automatic reload, HMR, HTML transformation, TypeScript, CSS, assets, file watching, build, and preview remain unsupported.
+<!-- Author: rsvite-architect -->
 
 C0 fails closed for JavaScript APIs. The npm package exposes a `rsvite` bin but no importable package entry, and its internal native loader is absent from the package export map. The CLI rejects `--config`, `build`, `preview`, and unknown options, and neither Node nor Rust discovers or reads a Vite configuration file. No Vite configuration, Plugin API hook, Runtime API, programmatic API, Vite dev server, Vite module graph, or JavaScript scheduler is loaded or called.
 <!-- Author: rsvite-lead -->
@@ -69,8 +69,8 @@ The lifecycle shape follows the documented `napi-rs` support for a Rust-backed s
 
 ### Acceptance
 
-The focused acceptance command is `pnpm exec vp run test:m1:html`. The task builds the native module, starts the CLI on an isolated port, and loads `/`. The response must be `200` with the HTML content type, the page title must be `rsvite M1 HTML`, `#app` must contain `served by Rust`, and the browser must report no page or console error. The task changes that text to `served by Rust again`, reloads the page, and requires the new text, proving that Rust reads the file for each request. It then sends `SIGTERM`, requires a zero exit, and proves that the same address can be rebound.
-<!-- Author: rsvite-lead -->
+The focused acceptance command is `pnpm exec vp run test:m1:html`. It builds the native module, starts the CLI on an isolated port, and loads `/`. The HTML response must be `200`, the page title must be `rsvite M1 HTML`, and the module request must render `served by Rust` without a page or console error. The browser test inspects the served `main.js` to prove that Rust rewrote its extensionless import, edits the imported dependency to `served by Rust again`, and requires a full reload to render the new value without restarting. It then sends `SIGTERM`, requires a zero exit, and proves that the same address can be rebound.
+<!-- Author: rsvite-architect -->
 
 The implementation PR depends on [Issue #2](https://github.com/hyfdev/rsvite/issues/2) for the compatibility contract, [Issue #3](https://github.com/hyfdev/rsvite/issues/3) for shared process and browser orchestration, and [Issue #4](https://github.com/hyfdev/rsvite/issues/4) for the exact Vite source pin and imported files. Issue #4 imports `playground/html/__tests__/html.spec.ts`, `playground/html/index.html`, and `playground/html/vite.config.js` without changing them. The selected `main > preserve comments` test is negative compatibility evidence for this slice, not positive raw C0 acceptance: Vite loads the config's C2 `transformIndexHtml` hook, while rsvite C0 ignores configuration and Plugin API. The test file and expectation remain unchanged.
 <!-- Author: rsvite-lead -->
@@ -84,11 +84,11 @@ The imported files live under `corpus/vite-upstream/` at Vite `ee644014aab61e546
 The rsvite result identifies the committed `packages/rsvite` name, version, and exact workspace source commit. Before the paired task builds the binding or replaces either result, it rejects invalid package metadata and staged, unstaged, or untracked product-source changes.
 <!-- Author: rsvite-lead -->
 
-`pnpm exec vp run test:m1:html` builds the native module, runs the positive `fixtures/m1-basic-html` product checks, verifies imported-file provenance and both committed compatibility results, and confirms the current rsvite outcome against the unchanged vendored test. It does not clone or install the external checkout or replace committed results. `pnpm exec vp run ready` depends on this focused task; a green run means the raw slice and recorded compatibility facts satisfy their contracts, not that rsvite passes the C2 upstream case.
-<!-- Author: rsvite-lead -->
+`pnpm exec vp run test:m1:html` builds the native module, runs the positive `fixtures/m1-basic-html` HTML and local-JavaScript product checks, verifies imported-file provenance and both committed compatibility results, and confirms the current rsvite outcome against the unchanged vendored test. It does not clone or install the external checkout or replace committed results. `pnpm exec vp run ready` depends on this focused task; a green run means the current C0 product path and recorded compatibility facts satisfy their contracts, not that rsvite passes the C2 upstream case.
+<!-- Author: rsvite-architect -->
 
-The first implementation PR also tests that a missing root and a busy requested port reject startup; a missing `index.html`, an unknown path, a non-`GET` request, and another file-read failure produce the declared HTTP responses; and `--config`, `build`, `preview`, an unknown option, an import of the package root, and an import of the private loader all fail.
-<!-- Author: rsvite-lead -->
+The core acceptance also tests that a missing root and a busy requested port reject startup; missing files, unknown paths, non-`GET` requests, and file-read failures produce the declared HTTP responses; and `--config`, `build`, `preview`, an unknown option, an import of the package root, and an import of the private loader all fail. The JavaScript slice adds explicit rejection coverage for bare and URL imports, traversal and symlink escape, directories, unsupported file types, missing modules, dynamic imports, and parser-reported syntax diagnostics.
+<!-- Author: rsvite-architect -->
 
 ### Options considered
 
@@ -109,6 +109,26 @@ Reopen the private lifecycle shape if a repeatable Node worker, garbage-collecti
 Reopen the core/binding input boundary when the first accepted C1 configuration or plugin behavior cannot cross it while preserving call order, cancellation, errors, and Rust state ownership. Adding later M1 handlers, a module graph, watching, or HMR behind the same Rust owner does not reopen this decision.
 <!-- Author: rsvite-lead -->
 
+## M1 local JavaScript import slice
+
+The current no-config fixture keeps `index.html` as the entry and adds `/src/main.js` as a browser module. `main.js` imports `./message` without an extension, so a browser cannot execute the fixture by treating Rust as a static file server: rsvite must resolve the import to `src/message.js` and rewrite the response to `/src/message.js`. The imported value renders into `#app` through the same public Node CLI and private N-API lifecycle as the HTML slice.
+<!-- Author: rsvite-architect -->
+
+For each `.js` request, `rsvite_core` canonicalizes the requested file inside the canonical project root, reads it, and uses Oxc's Rust parser to obtain its static module requests. Relative and root-relative requests resolve in Rust; extensionless requests add only `.js`, and transformed source contains root-relative, percent-encoded browser URLs. Bare and URL imports, dynamic imports, queries or fragments, traversal, symlink escape, directories, non-`.js` targets, missing modules, and parser-reported syntax diagnostics fail the request explicitly. No Vite core or JavaScript resolver is consulted.
+<!-- Author: rsvite-architect -->
+
+A successful transformation replaces that importer's outgoing edges in a Rust-owned directed graph. Each edge retains the importer and its resolved importee. The graph is deliberately limited to module identity: watcher timestamps, invalidation, transforms, HMR boundaries, and scheduling remain later decisions.
+<!-- Author: rsvite-architect -->
+
+JavaScript responses use `text/javascript; charset=utf-8` and `Cache-Control: no-store`. Source and imports are read and analyzed again on every request, so a full document reload observes a dependency edit without a watcher or restart. The Node package owns CLI behavior, the binding translates lifecycle calls, and the core owns project-file access, parsing, resolution, transformation, and graph state.
+<!-- Author: rsvite-architect -->
+
+A source-text pattern matcher was rejected because comments, strings, escapes, re-exports, and evolving JavaScript syntax would make false dependency edges and unsafe rewrites easy. A full Rust parser adds compile-time weight, but it makes the spans and decoded module specifiers authoritative while keeping execution ownership on the adopted side of the boundary.
+<!-- Author: rsvite-architect -->
+
+Reopen the `.js`-only resolution table when the TypeScript, CSS, asset, or bare-package leaf defines its accepted extensions and precedence. Reopen the per-request graph replacement when watching or HMR needs versioned transform state, but do not move analysis, resolution, or graph ownership into Node as part of that change.
+<!-- Author: rsvite-architect -->
+
 ## Open architecture questions
 
 - How supported Vite configuration values cross the N-API boundary.
@@ -119,8 +139,8 @@ Reopen the core/binding input boundary when the first accepted C1 configuration 
   <!-- Author: rsvite-lead -->
 - How SSR and environment runtimes execute JavaScript modules.
   <!-- Author: rsvite-lead -->
-- Which data structures and algorithms implement the module graph and HMR.
-  <!-- Author: rsvite-lead -->
+- How the M1 import graph evolves to represent transform versions, invalidation boundaries, and HMR propagation.
+  <!-- Author: rsvite-architect -->
 - Where Rolldown integrates with development and production execution.
   <!-- Author: rsvite-lead -->
 

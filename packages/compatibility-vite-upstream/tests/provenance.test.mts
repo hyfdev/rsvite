@@ -325,6 +325,14 @@ test("the current workspace matches its recorded subject", () => {
   try {
     const subject = readRsviteWorkspaceSubject(dir);
     assert.doesNotThrow(() => assertRsviteWorkspaceSubjectMatches(subject, dir));
+    assert.throws(
+      () => assertRsviteWorkspaceSubjectMatches({ ...subject, name: "other" }, dir),
+      /subject name must be rsvite at/,
+    );
+    assert.throws(
+      () => assertRsviteWorkspaceSubjectMatches({ ...subject, version: "9.9.9" }, dir),
+      /subject version must be 1\.2\.3 at/,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -345,30 +353,52 @@ test("an unrelated documentation commit does not stale the recorded subject", ()
   }
 });
 
-test("a committed workspace build-input change stales the recorded subject", () => {
+test("a historical subject remains attributable after a committed product change", () => {
   const dir = initRsviteWorkspaceFixture();
   try {
     const subject = readRsviteWorkspaceSubject(dir);
-    writeFileSync(join(dir, "pnpm-workspace.yaml"), "packages: []\n");
-    execFileSync("git", ["add", "pnpm-workspace.yaml"], { cwd: dir });
-    execFileSync("git", ["commit", "-m", "change workspace input"], { cwd: dir });
-
-    assert.throws(
-      () => assertRsviteWorkspaceSubjectMatches(subject, dir),
-      /product source differs from recorded subject commit/,
+    writeFileSync(
+      join(dir, "packages/rsvite/package.json"),
+      `${JSON.stringify({ name: "rsvite", version: "2.0.0" }, null, 2)}\n`,
     );
+    execFileSync("git", ["add", "packages/rsvite/package.json"], { cwd: dir });
+    execFileSync("git", ["commit", "-m", "release next version"], { cwd: dir });
+
+    assert.notDeepEqual(readRsviteWorkspaceSubject(dir), subject);
+    assert.doesNotThrow(() => assertRsviteWorkspaceSubjectMatches(subject, dir));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("a missing or unrelated recorded commit is rejected", () => {
+test("missing, pre-package, non-product, or unrelated recorded commits are rejected", () => {
   const dir = initRsviteWorkspaceFixture();
   try {
     const subject = readRsviteWorkspaceSubject(dir);
     assert.throws(
       () => assertRsviteWorkspaceSubjectMatches({ ...subject, commit: "0".repeat(40) }, dir),
       /subject commit does not exist in this checkout/,
+    );
+
+    const prePackage = execFileSync("git", ["rev-parse", "HEAD^"], {
+      cwd: dir,
+      encoding: "utf8",
+    }).trim();
+    assert.throws(
+      () => assertRsviteWorkspaceSubjectMatches({ ...subject, commit: prePackage }, dir),
+      /subject commit does not contain valid package metadata/,
+    );
+
+    writeFileSync(join(dir, "README.md"), "documentation\n");
+    execFileSync("git", ["add", "README.md"], { cwd: dir });
+    execFileSync("git", ["commit", "-m", "document fixture"], { cwd: dir });
+    const documentationCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: dir,
+      encoding: "utf8",
+    }).trim();
+    assert.throws(
+      () => assertRsviteWorkspaceSubjectMatches({ ...subject, commit: documentationCommit }, dir),
+      /subject commit is not an rsvite product-source commit/,
     );
 
     const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], {
