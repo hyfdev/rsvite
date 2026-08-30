@@ -583,9 +583,20 @@ test("an abort during the fixture exit request settles the adapter instead of ha
   const origin = `http://127.0.0.1:${String(port)}`;
   const hanging = spawn(process.execPath, [fixture("hang-server.mjs")], {
     env: { ...process.env, PORT: String(port) },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "ignore"],
   });
   try {
+    // The request has to be pending against a listening server. Without this barrier the
+    // connection can race server startup and fail with ECONNREFUSED, which a helper that
+    // cannot abort a real in-flight request would survive.
+    await new Promise<void>((resolve, reject) => {
+      let heard = "";
+      hanging.stdout.on("data", (chunk: Buffer) => {
+        heard += chunk.toString("utf8");
+        if (heard.includes("hanging server listening")) resolve();
+      });
+      hanging.once("exit", () => reject(new Error("hang-server exited before listening")));
+    });
     const controller = new AbortController();
     const adapter = exitsOnOpen(origin, createSyntheticBrowser());
     // A server that never answers keeps the request in flight, so the abort is the only thing
