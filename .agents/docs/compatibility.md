@@ -12,8 +12,8 @@ Product capability records observable behavior: HTML entry discovery and serving
 
 - **C0 — no Vite JavaScript API:** Node starts rsvite through `napi-rs`; Vite configuration, Plugin API, Runtime API, and programmatic API are unsupported.
   <!-- Author: rsvite-lead -->
-- **C1 — config bridge:** Node reads Vite configuration and passes the relevant supported configuration to Rust through `napi-rs`. The transport is not limited to serializable static data; the first supported behavior that needs a representation determines it. C1 does not imply plugin hooks, runtime execution, or programmatic APIs.
-  <!-- Author: rsvite-lead -->
+- **C1 — static `server.port` bridge:** At startup Node searches the root in Vite's default filename order and accepts only a first-found `vite.config.js`; no file found uses C0 behavior, while a first-found `.mjs`, `.ts`, `.cjs`, `.mts`, or `.cts` file fails with its name and explicit `--config` is rejected. Native module evaluation accepts only an ESM default export or CommonJS `module.exports` plain object shaped as optional `server` → optional integer `port` from 0 through 65535. A native Promise default export returned after module evaluation is rejected without waiting. The CLI first uses an intrinsic observer for that export; if Promise species prevents it, a temporary identity-filtered listener observes that export and rethrows an unrelated rejection on Node's normal error path. Node validates the exact subset before Rust starts even with `--port`, then selects CLI port over config port over 5173 and sends the exact scalar through the existing private N-API start object. Rust owns binding, listener, lifecycle, and busy-port failure; `0` is ephemeral. The CLI does not invoke Vite's config bundler, development server, Plugin API, TypeScript transform, runtime API, callback bridge, config reload, generic serialization, or another config behavior; an imported project configuration can use native Node dependencies such as Vite's `defineConfig`.
+  <!-- Author: rsvite-engineer -->
 - **C2 — selected Plugin API:** high-value hooks are added from blocking evidence in real projects and Vite upstream tests. Each supported hook records its arguments, result, order, error behavior, and Rust/JavaScript owner.
   <!-- Author: rsvite-lead -->
 - **C3 — selected Runtime and programmatic API:** runtime, environment, SSR, and JavaScript programmatic behavior are added from framework and application evidence.
@@ -58,11 +58,11 @@ Focused fixtures and create-vite templates may isolate a failure or provide a fa
 
 ### Historical recordings and current-product replay
 
-A committed rsvite result and its logs describe the product source named by `subject.commit`; later product work does not rewrite those historical bytes merely to move that SHA forward. Daily validation reads the package name and version from that recorded commit, requires the SHA itself to identify the product source, and requires it to remain in the current product-source ancestry. It does not require the newest C0 product tree to be byte-identical to the recorded tree. The supported recorder continues to require a clean committed product tree and records its exact source when a new measurement is intentionally made.
-<!-- Author: rsvite-architect -->
+A committed rsvite result and its logs describe the product source named by `subject.commit`; later product work does not rewrite those historical bytes merely to move that SHA forward. Daily validation reads the package name and version from that recorded commit, requires the SHA itself to identify the product source, and requires it to remain in the current product-source ancestry. It does not require the newest product tree to be byte-identical to the recorded tree. The supported recorder continues to require a clean committed product tree and records its exact source when a new measurement is intentionally made.
+<!-- Author: rsvite-engineer -->
 
-Currentness comes from replaying the unchanged input against the current product build. For the pinned HTML case, the live replay and committed artifact use the same whole-execution validator and must both fail only at the accepted C2 `transformIndexHtml` assertion. A product change is therefore allowed to preserve historical evidence when the exact behavior still reproduces; any different failure, extra failure, or unexpected pass makes the daily gate fail and requires an explicit compatibility decision rather than an automatic re-recording.
-<!-- Author: rsvite-architect -->
+Currentness for the pinned HTML C0 record comes from replaying the unchanged input through the current binding/core path, not through public CLI configuration discovery. The direct binding replay intentionally leaves the upstream root's configuration unread, so its live run and committed artifact continue to use the same whole-execution validator and fail only at the accepted C2 `transformIndexHtml` assertion. A public C1 CLI run at that root instead rejects its unsupported `input` key before startup. A product change that alters either declared path requires an explicit compatibility decision rather than an automatic re-recording.
+<!-- Author: rsvite-engineer -->
 
 ### HMR update ownership
 
