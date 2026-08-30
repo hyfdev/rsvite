@@ -11,11 +11,31 @@ import {
   runCommand,
   runCompatibilityCheck,
   startCommand,
+  type BrowserAdapter,
 } from "../src/index.ts";
 import { baseRequest, fixturesDir, freePort, syntheticManifest, withPort } from "./support.mts";
 
 function fixture(name: string): string {
   return join(fixturesDir, name);
+}
+
+/**
+ * Sends the fixture's exit request from `open` — the step the runner only reaches after HTTP
+ * readiness — then delegates to the synthetic browser for the pending and abort behavior the
+ * regression needs. The fixture therefore exits strictly after readiness, which these
+ * regressions used to approximate with a wall-clock timer that could lose to the hosted
+ * runner's own startup cost.
+ */
+function exitsOnOpen(origin: string, inner: BrowserAdapter): BrowserAdapter {
+  return {
+    async open(request) {
+      const response = await fetch(new URL("/__rsvite-exit", origin));
+      if (!response.ok) {
+        throw new Error(`the fixture exit request returned ${String(response.status)}`);
+      }
+      return inner.open(request);
+    },
+  };
 }
 
 /** An entry that declares the capability these probes claim, so the pair stays coherent. */
@@ -372,18 +392,20 @@ test("a completed run leaves no timer holding the host open", async () => {
 
 test("a lifecycle process that dies after readiness cannot be recorded as a pass", async () => {
   const port = await freePort();
+  const origin = `http://127.0.0.1:${String(port)}`;
   const request = await baseRequest("rsvite", {
-    origin: `http://127.0.0.1:${String(port)}`,
-    browser: createSyntheticBrowser({ stepDelayMs: 150 }),
+    origin,
+    browser: exitsOnOpen(origin, createSyntheticBrowser({ hangUntilAborted: "open" })),
     timeouts: { installMs: 10_000, lifecycleMs: 10_000, browserMs: 5_000 },
   });
   const manifest = structuredClone(syntheticManifest()) as {
     entries: { commands: Record<string, { argv: string[]; env?: Record<string, string> }> }[];
   };
-  // HTTP readiness, then the server exits by itself while the browser is still working.
+  // HTTP readiness, then the exit request sent from `open` kills the server while `open`
+  // is still pending, so the death lands inside acceptance without any wall-clock wait.
   manifest.entries[0]!.commands["dev"] = {
     argv: [process.execPath, fixture("flaky-server.mjs")],
-    env: { PORT: String(port), EXIT_AFTER_MS: "100", EXIT_CODE: "7" },
+    env: { PORT: String(port), EXIT_CODE: "7" },
   };
 
   const report = await runCompatibilityCheck({ ...request, manifest });
@@ -519,9 +541,10 @@ test("the first incompatible behavior is the first one observed", async () => {
 
 test("a lifecycle process that exits cleanly after readiness is still a failure", async () => {
   const port = await freePort();
+  const origin = `http://127.0.0.1:${String(port)}`;
   const request = await baseRequest("rsvite", {
-    origin: `http://127.0.0.1:${String(port)}`,
-    browser: createSyntheticBrowser({ stepDelayMs: 150 }),
+    origin,
+    browser: exitsOnOpen(origin, createSyntheticBrowser({ hangUntilAborted: "open" })),
     timeouts: { installMs: 10_000, lifecycleMs: 10_000, browserMs: 5_000 },
   });
   const manifest = structuredClone(syntheticManifest()) as {
@@ -531,7 +554,7 @@ test("a lifecycle process that exits cleanly after readiness is still a failure"
   // ending at all means acceptance was measured against something that was no longer there.
   manifest.entries[0]!.commands["dev"] = {
     argv: [process.execPath, fixture("flaky-server.mjs")],
-    env: { PORT: String(port), EXIT_AFTER_MS: "100", EXIT_CODE: "0" },
+    env: { PORT: String(port), EXIT_CODE: "0" },
   };
 
   const report = await runCompatibilityCheck({ ...request, manifest });
@@ -585,9 +608,10 @@ test("a process killed during acceptance is not mistaken for one the runner stop
 
 test("an early exit outranks a later browser failure", async () => {
   const port = await freePort();
+  const origin = `http://127.0.0.1:${String(port)}`;
   const request = await baseRequest("rsvite", {
-    origin: `http://127.0.0.1:${String(port)}`,
-    browser: createSyntheticBrowser({ hangUntilAborted: "open" }),
+    origin,
+    browser: exitsOnOpen(origin, createSyntheticBrowser({ hangUntilAborted: "open" })),
     timeouts: { installMs: 10_000, lifecycleMs: 30_000, browserMs: 2_000 },
   });
   const manifest = structuredClone(syntheticManifest()) as {
@@ -595,14 +619,14 @@ test("an early exit outranks a later browser failure", async () => {
   };
   manifest.entries[0]!.commands["dev"] = {
     argv: [process.execPath, fixture("flaky-server.mjs")],
-    env: { PORT: String(port), EXIT_AFTER_MS: "100", EXIT_CODE: "7" },
+    env: { PORT: String(port), EXIT_CODE: "7" },
   };
 
   const report = await runCompatibilityCheck({ ...request, manifest });
   const result = report.result as Record<string, unknown>;
   const failure = result["firstIncompatibleBehavior"] as { message: string };
 
-  // The exit happened at 100 ms; the browser budget would not have expired until 2,000 ms.
+  // The exit is triggered as `open` starts; the browser budget would not expire until 2,000 ms.
   assert.match(failure.message, /ended on its own/);
 });
 

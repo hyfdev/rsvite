@@ -126,6 +126,9 @@ the update window closes or its abort signal fires, so late adapter work cannot 
 ## Fixtures
 
 `fixtures/` holds a synthetic project — one HTTP server serving one document, and a script that
-exits with a requested code after a requested delay. They exist to drive success, failure, timeout,
-readiness, browser and cleanup paths. They are not a corpus entry and produce no compatibility
-evidence about any project.
+exits with a requested code after a requested delay. A second server exits with a configured code
+only when a test requests `/__rsvite-exit`, so a regression places the exit where the runner's
+own ordering puts it — after HTTP readiness — instead of trusting a wall clock to beat the
+hosted runner's startup. They exist to drive success, failure, timeout, readiness, browser and
+cleanup paths. They are not a corpus entry and produce no compatibility evidence about any
+project.
