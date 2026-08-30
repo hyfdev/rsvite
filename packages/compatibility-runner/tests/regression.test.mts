@@ -24,15 +24,21 @@ function fixture(name: string): string {
  * readiness — then delegates to the synthetic browser for the pending and abort behavior the
  * regression needs. The fixture therefore exits strictly after readiness, which these
  * regressions used to approximate with a wall-clock timer that could lose to the hosted
- * runner's own startup cost.
+ * runner's own startup cost. The request phase itself honors the adapter contract: an abort
+ * that lands before or during the request settles this `open`, and an already-aborted signal
+ * is never delegated into the synthetic browser's future-only abort listener.
  */
 function exitsOnOpen(origin: string, inner: BrowserAdapter): BrowserAdapter {
   return {
     async open(request) {
-      const response = await fetch(new URL("/__rsvite-exit", origin));
+      request.signal.throwIfAborted();
+      const response = await fetch(new URL("/__rsvite-exit", origin), {
+        signal: request.signal,
+      });
       if (!response.ok) {
         throw new Error(`the fixture exit request returned ${String(response.status)}`);
       }
+      request.signal.throwIfAborted();
       return inner.open(request);
     },
   };
@@ -566,7 +572,49 @@ test("a lifecycle process that exits cleanly after readiness is still a failure"
     "fail",
     "a server that vanished mid-acceptance was recorded as usable",
   );
+  // The code has to be the recorded one, not just any nonzero exit: configuring 7 instead of
+  // 0 produces the same lifecycle message, so only the recorded code pins the clean-exit path.
+  assert.equal((result["command"] as { exitCode: number }).exitCode, 0);
   assert.match(failure.message, /ended on its own/);
+});
+
+test("an abort during the fixture exit request settles the adapter instead of hanging it", async () => {
+  const port = await freePort();
+  const origin = `http://127.0.0.1:${String(port)}`;
+  const hanging = spawn(process.execPath, [fixture("hang-server.mjs")], {
+    env: { ...process.env, PORT: String(port) },
+    stdio: "ignore",
+  });
+  try {
+    const controller = new AbortController();
+    const adapter = exitsOnOpen(origin, createSyntheticBrowser());
+    // A server that never answers keeps the request in flight, so the abort is the only thing
+    // that can settle this `open` — without it, the runner would wait on the adapter forever.
+    const opening = adapter.open({
+      url: `${origin}/`,
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    });
+    controller.abort(new Error("the lifecycle command ended during acceptance"));
+    await assert.rejects(opening, /ended during acceptance/);
+  } finally {
+    hanging.kill("SIGKILL");
+    await new Promise((resolve) => hanging.once("close", resolve));
+  }
+});
+
+test("an already-aborted signal settles the adapter instead of reaching the pending open", async () => {
+  const port = await freePort();
+  const origin = `http://127.0.0.1:${String(port)}`;
+  const controller = new AbortController();
+  controller.abort(new Error("aborted before open"));
+  const adapter = exitsOnOpen(origin, createSyntheticBrowser({ hangUntilAborted: "open" }));
+  // The synthetic `open` subscribes only to a future abort, so delegating an already-aborted
+  // signal would never settle. The request phase must reject before delegation.
+  await assert.rejects(
+    adapter.open({ url: `${origin}/`, timeoutMs: 10_000, signal: controller.signal }),
+    /aborted before open/,
+  );
 });
 
 test("a process killed during acceptance is not mistaken for one the runner stopped", async () => {
