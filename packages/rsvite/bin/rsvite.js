@@ -22,8 +22,7 @@ function usageError(message) {
 
 export function parseArguments(argv) {
   let root;
-  let port = DEFAULT_PORT;
-  let hasExplicitPort = false;
+  let port;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -37,13 +36,11 @@ export function parseArguments(argv) {
       const value = argv[index + 1];
       if (value === undefined) usageError("--port requires a value");
       port = parsePort(value);
-      hasExplicitPort = true;
       index += 1;
       continue;
     }
     if (argument.startsWith("--port=")) {
       port = parsePort(argument.slice("--port=".length));
-      hasExplicitPort = true;
       continue;
     }
     if (argument.startsWith("-")) usageError(`unknown option: ${argument}`);
@@ -51,7 +48,7 @@ export function parseArguments(argv) {
     root = argument;
   }
 
-  return { root: resolve(root ?? "."), port, hasExplicitPort };
+  return { root: resolve(root ?? "."), port };
 }
 
 function parsePort(value) {
@@ -92,18 +89,7 @@ function validateKeys(object, allowedKeys, location) {
 }
 
 function observeExportedPromiseRejection(promise) {
-  try {
-    void Promise.prototype.then.call(promise, undefined, () => {});
-  } catch {
-    const onUnhandledRejection = (reason, rejectedPromise) => {
-      if (rejectedPromise === promise) {
-        process.off("unhandledRejection", onUnhandledRejection);
-        return;
-      }
-      throw reason;
-    };
-    process.prependListener("unhandledRejection", onUnhandledRejection);
-  }
+  void Promise.prototype.then.call(promise, undefined, () => {});
 }
 
 function validateConfiguration(value) {
@@ -162,12 +148,11 @@ export async function resolveStartOptions(argv) {
   const configuration = await loadConfiguration(options.root);
   return {
     root: options.root,
-    port: options.hasExplicitPort ? options.port : (configuration.port ?? options.port),
+    port: options.port ?? configuration.port ?? DEFAULT_PORT,
   };
 }
 
-async function run(argv) {
-  const options = await resolveStartOptions(argv);
+async function run(options) {
   const server = await DevServer.start(options);
 
   const completion = new Promise((resolveRun, rejectRun) => {
@@ -197,20 +182,29 @@ async function run(argv) {
     );
   });
 
-  // `Local:` is the public readiness boundary. Both signal paths must already translate into
-  // Rust-owned graceful shutdown before a parent can observe those bytes and interrupt us.
+  // `Local:` is written after the signal handlers are registered, so a signal received after
+  // readiness closes the Rust server gracefully.
   process.stdout.write(`Local: http://${server.address}/\n`);
   await completion;
+}
+
+async function writeFailure(error) {
+  const message = `rsvite: ${error instanceof Error ? error.message : String(error)}\n`;
+  await new Promise((resolveWrite) => process.stderr.write(message, resolveWrite));
 }
 
 const invokedAsProgram =
   process.argv[1] !== undefined &&
   realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-if (invokedAsProgram) {
+async function main(argv) {
   try {
-    await run(process.argv.slice(2));
+    await run(await resolveStartOptions(argv));
   } catch (error) {
-    process.stderr.write(`rsvite: ${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 1;
+    await writeFailure(error);
+    process.exit(1);
+    return;
   }
+  process.exit(0);
 }
+
+if (invokedAsProgram) await main(process.argv.slice(2));

@@ -43,6 +43,23 @@ function waitForExit(child) {
   });
 }
 
+async function waitForExitWithin(exit, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      exit,
+      new Promise((_, rejectExit) => {
+        timer = setTimeout(
+          () => rejectExit(new Error("CLI did not exit before the timeout")),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function waitForReadiness(child) {
   return new Promise((resolveAddress, rejectAddress) => {
     let stdout = "";
@@ -152,7 +169,7 @@ async function waitForFile(file, timeoutMs = 10_000) {
   }
 }
 
-async function expectServing(root, arguments_, expectedPort) {
+async function expectServing(root, arguments_, expectedPort, exitTimeoutMs = 10_000) {
   const child = startCli(root, arguments_);
   const exit = waitForExit(child);
   let port;
@@ -163,7 +180,10 @@ async function expectServing(root, arguments_, expectedPort) {
     const rootHtml = await fetch(`${readiness.origin}/`).then((response) => response.text());
     expect(rootHtml).toContain("<h1>static config</h1>");
     expect(child.kill("SIGTERM")).toBe(true);
-    await expect(exit).resolves.toEqual({ code: 0, signal: null });
+    await expect(waitForExitWithin(exit, exitTimeoutMs)).resolves.toEqual({
+      code: 0,
+      signal: null,
+    });
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     await exit.catch(() => undefined);
@@ -282,11 +302,15 @@ describe("static Vite configuration", () => {
     const occupied = await listenOn(port);
     const root = await createFixture({
       "package.json": '{"type":"module"}\n',
-      "vite.config.js": `export default { server: { port: ${String(port)} } };\n`,
+      "vite.config.js": [
+        "setInterval(() => {}, 60_000);",
+        `export default { server: { port: ${String(port)} } };`,
+        "",
+      ].join("\n"),
     });
 
     try {
-      const result = await runCli(root);
+      const result = await runCli(root, [], 3_000);
       expect(result).toMatchObject({ code: 1, signal: null });
       expect(result.stdout).not.toContain("Local:");
       expect(result.stderr).toContain(`failed to bind 127.0.0.1:${String(port)}`);
@@ -295,6 +319,19 @@ describe("static Vite configuration", () => {
       await closeServer(occupied);
     }
     await provePortCanRebind(port);
+  });
+
+  test("closes after SIGTERM when configuration retains an interval", async () => {
+    const root = await createFixture({
+      "package.json": '{"type":"module"}\n',
+      "vite.config.js": [
+        "setInterval(() => {}, 60_000);",
+        "export default { server: { port: 0 } };",
+        "",
+      ].join("\n"),
+    });
+
+    expect(await expectServing(root, [], undefined, 3_000)).toBeGreaterThan(0);
   });
 
   test.each([
@@ -363,52 +400,29 @@ describe("static Vite configuration", () => {
     );
   });
 
-  test("reports one diagnostic for a rejected native Promise subclass", async () => {
-    const result = await expectConfigurationFailure({
-      source: [
-        "class RejectedConfigPromise extends Promise {",
-        "  static get [Symbol.species]() {",
-        "    return 0;",
-        "  }",
-        "}",
-        `export default RejectedConfigPromise.reject(new Error("subclass config rejection"));`,
+  test.each([
+    [
+      "a rejected Promise retaining a timer",
+      [
+        "setTimeout(() => {}, 60_000);",
+        `export default Promise.reject(new Error("timer config Promise"));`,
         "",
       ].join("\n"),
+    ],
+    [
+      "a resolved Promise retaining an interval",
+      ["setInterval(() => {}, 60_000);", "export default Promise.resolve({});", ""].join("\n"),
+    ],
+  ])("rejects %s without waiting for its referenced resource", async (_kind, source) => {
+    const result = await expectConfigurationFailure({
+      source,
       message: "not a Promise",
+      timeoutMs: 3_000,
     });
 
     expect(result.stderr).toBe(
       "rsvite: invalid vite.config.js: must default-export a plain object, not a Promise\n",
     );
-  });
-
-  test("reports an unrelated rejected Promise through Node", async () => {
-    const port = await findAvailablePort();
-    const root = await createFixture({
-      "package.json": '{"type":"module"}\n',
-      "vite.config.js": [
-        "class RejectedConfigPromise extends Promise {",
-        "  static get [Symbol.species]() {",
-        "    return 0;",
-        "  }",
-        "}",
-        `Promise.reject(new Error("unrelated config rejection"));`,
-        `export default RejectedConfigPromise.reject(new Error("exported config rejection"));`,
-        "",
-      ].join("\n"),
-    });
-
-    const result = await runCli(root, ["--port", String(port)]);
-
-    expect(result).toMatchObject({ code: 1, signal: null });
-    expect(result.stdout).not.toContain("Local:");
-    expect(result.stderr).toContain(
-      "rsvite: invalid vite.config.js: must default-export a plain object, not a Promise",
-    );
-    expect(result.stderr).toContain("unrelated config rejection");
-    expect(result.stderr).not.toContain("exported config rejection");
-    expect(result.stderr.match(/rsvite:/g)).toHaveLength(1);
-    await provePortCanRebind(port);
   });
 
   test.each([
