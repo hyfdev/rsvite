@@ -27,7 +27,12 @@ describe("CLI arguments", () => {
       root: resolve(repositoryRoot, "fixtures/m1-basic-html"),
       port: 0,
     });
-    expect(parseArguments(["--port=4173", "fixtures/m1-basic-html"]).port).toBe(4173);
+    expect(parseArguments(["--port=4173", "fixtures/m1-basic-html"])).toMatchObject({
+      port: 4173,
+    });
+    expect(parseArguments(["fixtures/m1-basic-html"])).toMatchObject({
+      port: undefined,
+    });
   });
 
   test.each([

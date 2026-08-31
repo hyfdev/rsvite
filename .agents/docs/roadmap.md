@@ -25,10 +25,18 @@ M1 leaf issues are created incrementally. The first architecture issue fixes the
 M1 serves browser JavaScript and removes TypeScript variable declaration annotations through Rust-owned static-import analysis and transformation, local `.js`-then-`.ts` resolution and rewrite, and a directed importer-to-importee graph. It also serves project-contained stylesheets and SVG assets as raw bytes with declared content types, re-read on every request. A Rust watcher groups each edit window on that file surface into one coarse reload event on every open stream, and the built-in client answers it by loading the document again unless it is already loading one, which is how dependency, stylesheet, asset and root-document edits reach the browser. Other TypeScript syntax, TSX/JSX, source maps, CSS parsing and `@import`, other asset types, packages, and state-preserving HMR remain later evidence-scoped leaves. Current-product replay validates the advancing product against the compatibility fact recorded by the committed C0 result.
 <!-- Author: rsvite-senior-engineer -->
 
+## First C1 — static default `server.port` configuration
+
+The first C1 leaf has Node as the one-time configuration evaluator and Rust as the development-server owner. Node searches only Vite's default config filename order, accepts an ESM default export or CommonJS `module.exports` from `vite.config.js` only when it is the bounded plain-object `server.port` subset, validates it before the existing N-API start call, and passes the chosen port unchanged. An explicit CLI port wins after the same discovery and validation; an absent config uses 5173; `0` is ephemeral; unsupported first-found filenames, values, fields, load errors, and busy requested ports fail rather than silently falling back or scanning.
+<!-- Author: rsvite-engineer -->
+
+This leaf is intentionally not a generic configuration layer: explicit paths, TypeScript/config bundling, functions, Promises, modes, environment loading, aliases, host and strict-port settings, plugins, callbacks, config-file watching or restart, build, preview, and programmatic APIs stay later evidence-scoped work.
+<!-- Author: rsvite-engineer -->
+
 ## Later directions
 
-- Establish the C1 configuration bridge: Node loads Vite configuration and passes the supported values through `napi-rs`; the representation follows the first selected configuration behavior rather than a preselected serialization format.
-  <!-- Author: rsvite-lead -->
+- Expand C1 only from a new evidence-scoped configuration behavior that preserves the C1 static-port boundary and records any necessary N-API representation decision.
+  <!-- Author: rsvite-engineer -->
 - Pass DrawDB with the React/JSX/HMR and Plugin API behavior it actually requires.
   <!-- Author: rsvite-lead -->
 - Expand build and preview, using Rolldown where the selected architecture makes it appropriate.
