@@ -94,7 +94,7 @@ pub(crate) fn append_request_segments(
 ) -> Result<PathBuf, ProjectFileError> {
     let mut candidate = root.to_path_buf();
     for segment in relative.split('/') {
-        if segment.is_empty() || segment == "." || segment == ".." || segment.contains('\\') {
+        if !names_a_segment_a_request_may_use(segment) {
             return Err(ProjectFileError::new(
                 ProjectFileErrorKind::BadRequest,
                 format!("invalid or traversing {subject} request path: {request_path}"),
@@ -109,6 +109,16 @@ pub(crate) fn append_request_segments(
         candidate.push(segment);
     }
     Ok(candidate)
+}
+
+/// Whether one path segment is one a request may name.
+///
+/// A request that cannot name a segment is a request this server refuses, so this decides what a
+/// page is allowed to ask for. It says nothing about the file that name leads to: resolution
+/// happens after this, and a name a request may use can lead to a file whose own path this would
+/// refuse. Watching asks this of the names it looks for, not of the paths it is told about.
+pub(crate) fn names_a_segment_a_request_may_use(segment: &str) -> bool {
+    !(segment.is_empty() || segment == "." || segment == ".." || segment.contains('\\'))
 }
 
 /// The file a candidate really is, once every link has been followed. Containment is decided on

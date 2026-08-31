@@ -10,6 +10,7 @@ axum = "=0.8.9"
 napi = { version = "=3.12.2", features = ["async", "napi8"] }
 napi-build = "=2.4.1"
 napi-derive = "=3.6.2"
+notify = "=8.2.0"
 oxc_allocator = "=0.147.0"
 oxc_ast = "=0.147.0"
 oxc_ast_visit = "=0.147.0"
@@ -26,4 +27,6 @@ tokio = { version = "=1.53.1", features = [
   "net",
   "rt-multi-thread",
   "sync",
+  "time",
 ] }
+tokio-stream = { version = "=0.1.19", features = ["sync"] }

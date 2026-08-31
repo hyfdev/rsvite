@@ -18,7 +18,7 @@ use crate::project_file::{
 };
 
 /// The file kinds a module request or import may resolve to.
-const MODULE_EXTENSIONS: &[&str] = &["js", "ts"];
+pub(crate) const MODULE_EXTENSIONS: &[&str] = &["js", "ts"];
 
 const MODULE_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
@@ -458,6 +458,17 @@ fn append_import_segments(
         ));
     }
     Ok(candidate)
+}
+
+/// Whether the module route could answer with this resolved file at all.
+///
+/// A module response rewrites each of its imports to the URL the import resolved to, so a module
+/// this server cannot write a URL for is one it refuses however the request was spelt. That is a
+/// property of the resolved file rather than of the request, and it does not change while the file
+/// stays where it is. Watching asks it too, so an edit to a file the module route can never answer
+/// with does not reload a page.
+pub(crate) fn can_be_named_in_a_module_url(root: &Path, path: &Path) -> bool {
+    module_url(root, path).is_ok()
 }
 
 fn module_url(root: &Path, path: &Path) -> Result<String, ModuleError> {

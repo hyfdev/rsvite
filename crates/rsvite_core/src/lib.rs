@@ -1,4 +1,5 @@
 use std::{
+    convert::Infallible,
     net::{Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -9,23 +10,34 @@ use axum::{
     body::Body,
     extract::State,
     http::{HeaderValue, Method, StatusCode, Uri, header},
-    response::Response,
+    response::{
+        IntoResponse, Response,
+        sse::{Event, Sse},
+    },
     routing::any,
 };
 use thiserror::Error;
 use tokio::{
     net::TcpListener,
-    sync::{oneshot, watch},
+    sync::{Notify, broadcast, mpsc, oneshot, watch},
+};
+use tokio_stream::{
+    StreamExt,
+    wrappers::{BroadcastStream, WatchStream},
 };
 
 mod javascript;
 mod module_graph;
 mod project_file;
+mod reload;
 mod resource;
+mod root_document;
+mod watcher;
 
 use javascript::load as load_javascript;
 use module_graph::ModuleGraph;
 use project_file::{ProjectFileError, ProjectFileErrorKind};
+use reload::{CLIENT_PATH, EVENTS_PATH, RELOAD_EVENT};
 use resource::{load_resource, resource_kind_for};
 
 #[derive(Debug, Error)]
@@ -44,6 +56,10 @@ pub enum ServerError {
         #[source]
         source: std::io::Error,
     },
+    // The watcher library is an implementation detail, so its error type does not become part of
+    // this one; what a caller can act on is which root could not be watched, and why.
+    #[error("failed to watch root {root}: {message}")]
+    Watch { root: PathBuf, message: String },
     #[error("development server failed: {0}")]
     Serve(String),
     #[error("development server stopped before reporting its final state")]
@@ -60,25 +76,106 @@ enum LifecycleState {
 
 struct Inner {
     address: SocketAddr,
-    shutdown: Mutex<Option<oneshot::Sender<()>>>,
     lifecycle: watch::Receiver<LifecycleState>,
+    // Registering a cause is how a shutdown starts, so every reason is recorded the same way
+    // and in the order they happen.
+    shutdown: Arc<ShutdownSlot>,
+    // A listener that ends on its own is the third reason a server stops. Nothing in the product
+    // ends it that way on demand, so tests reach it through this handle.
+    #[cfg(test)]
+    serving_abort: tokio::task::AbortHandle,
     #[cfg(test)]
     state: Arc<ServerState>,
+}
+
+/// Why the server is shutting down.
+#[derive(Clone, Debug)]
+enum ShutdownCause {
+    Requested,
+    WatchFailure(String),
+    /// The listener stopped on its own; what it reported is read by joining its task.
+    ListenerEnded,
+}
+
+/// Registers the end of the listener where it happens, however it happens.
+///
+/// A task that is cancelled never reaches its last statement, so the registration lives in a drop
+/// guard: ending normally, failing, panicking and being cancelled all pass through it.
+struct ListenerEnds(Arc<ShutdownSlot>);
+
+impl Drop for ListenerEnds {
+    fn drop(&mut self) {
+        self.0.register(ShutdownCause::ListenerEnded);
+    }
+}
+
+/// The one reason this server stopped.
+///
+/// All three causes are registered where they happen — a caller's request in the calling thread, a
+/// watcher failure in the callback that reports it, the listener ending in the task that ran it —
+/// so the first registration is the first event. Deciding the order later, by which channel a reader happens to poll first, would let a
+/// failure that occurred after a close request still overrule it.
+#[derive(Default)]
+struct ShutdownSlot {
+    cause: Mutex<Option<ShutdownCause>>,
+    registered: Notify,
+}
+
+impl ShutdownSlot {
+    fn register(&self, cause: ShutdownCause) {
+        let mut slot = self.cause.lock().expect("shutdown cause mutex poisoned");
+        if slot.is_none() {
+            *slot = Some(cause);
+            self.registered.notify_one();
+        }
+    }
+
+    async fn first_cause(&self) -> ShutdownCause {
+        loop {
+            // Arming the wake-up before reading is what keeps a registration that lands between
+            // the two from being missed.
+            let registered = self.registered.notified();
+            if let Some(cause) = self
+                .cause
+                .lock()
+                .expect("shutdown cause mutex poisoned")
+                .clone()
+            {
+                return cause;
+            }
+            registered.await;
+        }
+    }
 }
 
 struct ServerState {
     root: PathBuf,
     module_graph: Mutex<ModuleGraph>,
+    reloads: broadcast::Sender<()>,
+    // Closing is state, not an event. A stream that subscribes after a shutdown has begun reads
+    // the current value and ends immediately, which an event sent once would never reach.
+    lifecycle: watch::Receiver<LifecycleState>,
 }
 
 impl ServerState {
-    fn new(root: PathBuf) -> Self {
+    fn new(root: PathBuf, lifecycle: watch::Receiver<LifecycleState>) -> Self {
         Self {
             root,
             module_graph: Mutex::new(ModuleGraph::default()),
+            // A reload nobody is open to receive is not kept: the next document load reads
+            // the current files anyway.
+            reloads: broadcast::channel(RELOAD_BACKLOG).0,
+            lifecycle,
         }
     }
 }
+
+/// How many reloads a stream may fall behind before it is told it missed some.
+///
+/// A page only needs to load once however many it missed, so a small backlog is enough: the
+/// stream turns an overflow into one more event rather than ending, and the client is what
+/// collapses whatever arrives into a single navigation.
+const RELOAD_BACKLOG: usize = 8;
 
 pub struct DevServer {
     inner: Inner,
@@ -109,26 +206,113 @@ impl DevServer {
         let address = listener
             .local_addr()
             .map_err(|source| ServerError::Bind { port, source })?;
-        let state = Arc::new(ServerState::new(canonical_root));
+        let (task_lifecycle, lifecycle) = watch::channel(LifecycleState::Running);
+        let state = Arc::new(ServerState::new(canonical_root.clone(), lifecycle.clone()));
+
+        // Watching starts before this function returns, so the readiness the CLI prints means
+        // both that the listener accepts requests and that a save will be seen. The project is
+        // watched recursively. Resolving `index.html` also watches, without recursion, the parent
+        // directory of every symlink that resolution goes through and the parent directory of the
+        // file it ends at, because `GET /` answers with that file however far away it lives.
+        let (notices, watched_changes) = mpsc::unbounded_channel();
+        let shutdown = Arc::new(ShutdownSlot::default());
+        let watch_failed = {
+            let shutdown = Arc::clone(&shutdown);
+            move |message: String| shutdown.register(ShutdownCause::WatchFailure(message))
+        };
+        let watcher: watcher::SharedWatcher = Arc::new(std::sync::Mutex::new(Some(
+            watcher::watch(&canonical_root, notices, watch_failed.clone()).map_err(|source| {
+                ServerError::Watch {
+                    root: canonical_root.clone(),
+                    message: source.to_string(),
+                }
+            })?,
+        )));
+        let (resolution, external) =
+            watcher::watch_the_way_to_the_document(&watcher, &canonical_root).map_err(
+                |source| ServerError::Watch {
+                    root: canonical_root.clone(),
+                    message: source.to_string(),
+                },
+            )?;
+
+        let (published, mut completed) = mpsc::unbounded_channel();
+        let coalescer = watcher::spawn_coalescer(
+            canonical_root,
+            Arc::clone(&watcher),
+            resolution,
+            external,
+            watched_changes,
+            published,
+            watch_failed,
+        );
+        let forwarder = {
+            let reloads = state.reloads.clone();
+            tokio::spawn(async move {
+                while completed.recv().await.is_some() {
+                    // No open page is not an error: the next document load reads current files.
+                    let _ = reloads.send(());
+                }
+            })
+        };
+
         // Axum's GET router also accepts HEAD, so the handler enforces the narrower contract.
         let router = Router::new()
             .route("/", any(serve_request))
             .route("/{*path}", any(serve_request))
             .with_state(Arc::clone(&state));
 
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let (task_lifecycle, lifecycle) = watch::channel(LifecycleState::Running);
+        let (listener_shutdown_tx, listener_shutdown_rx) = oneshot::channel::<()>();
+        let serving = tokio::spawn({
+            let shutdown = Arc::clone(&shutdown);
+            async move {
+                let _ends = ListenerEnds(shutdown);
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(async move {
+                        let _ = listener_shutdown_rx.await;
+                    })
+                    .await
+            }
+        });
+
+        // One task owns the shutdown from end to end: it decides the cause, publishes the closing
+        // state every stream can read, stops watching, closes the listener, waits for the work
+        // that fed it, and only then publishes the final state.
+        #[cfg(test)]
+        let serving_abort = serving.abort_handle();
+        let owned_shutdown = Arc::clone(&shutdown);
         tokio::spawn(async move {
-            let shutdown_lifecycle = task_lifecycle.clone();
-            let result = axum::serve(listener, router)
-                .with_graceful_shutdown(async move {
-                    let _ = shutdown_rx.await;
-                    shutdown_lifecycle.send_replace(LifecycleState::Closing);
-                })
-                .await;
-            let final_state = match result {
-                Ok(()) => LifecycleState::Closed,
-                Err(error) => LifecycleState::Failed(error.to_string()),
+            // A server stops for one of three reasons, and each registers itself where it
+            // happens, so the first registration is the one that began the shutdown. Deciding
+            // between an already registered cause and an already finished task here would put
+            // that order back in the hands of whichever this task polls first.
+            let cause = owned_shutdown.first_cause().await;
+
+            // Leaving `Running` is what ends the open streams, including one that subscribes
+            // after this point.
+            task_lifecycle.send_replace(LifecycleState::Closing);
+            // Taking the watcher away stops every directory it was watching at once, and closes
+            // the channel that keeps the coalescer and the forwarder alive.
+            watcher.lock().expect("watcher mutex poisoned").take();
+            // Harmless if the listener has already stopped: it is what asks a running one to.
+            let _ = listener_shutdown_tx.send(());
+            let served = serving.await;
+            let _ = coalescer.await;
+            let _ = forwarder.await;
+
+            // The cause says why the shutdown began; it is not always what a caller is told.
+            // A listener that reported an error, or a task that ended without returning one,
+            // describes the work being closed more precisely than the reason for closing it, so
+            // that is reported instead.
+            let final_state = match (served, cause) {
+                (Ok(Err(error)), _) => LifecycleState::Failed(error.to_string()),
+                (Err(error), _) => LifecycleState::Failed(error.to_string()),
+                (Ok(Ok(())), ShutdownCause::WatchFailure(message)) => {
+                    LifecycleState::Failed(format!("file watcher failed: {message}"))
+                }
+                (Ok(Ok(())), ShutdownCause::Requested | ShutdownCause::ListenerEnded) => {
+                    LifecycleState::Closed
+                }
             };
             task_lifecycle.send_replace(final_state);
         });
@@ -136,8 +320,10 @@ impl DevServer {
         Ok(Self {
             inner: Inner {
                 address,
-                shutdown: Mutex::new(Some(shutdown_tx)),
                 lifecycle,
+                shutdown,
+                #[cfg(test)]
+                serving_abort,
                 #[cfg(test)]
                 state,
             },
@@ -165,14 +351,33 @@ impl DevServer {
     }
 
     pub async fn close(&self) -> Result<(), ServerError> {
-        let shutdown = {
-            let mut shutdown = self.inner.shutdown.lock().expect("shutdown mutex poisoned");
-            shutdown.take()
-        };
-        if let Some(shutdown) = shutdown {
-            let _ = shutdown.send(());
-        }
+        self.begin_closing();
         self.wait().await
+    }
+
+    /// Asks the server to stop, without waiting for it.
+    ///
+    /// The shutdown itself belongs to one task, so this only registers the request; stopping the
+    /// watcher, ending open streams, closing the listener and waiting for the remaining work all
+    /// happen there, in that order.
+    fn begin_closing(&self) {
+        self.inner.shutdown.register(ShutdownCause::Requested);
+    }
+}
+
+/// Letting go of the handle is a close request.
+///
+/// This handle is the only way to ask this server to stop, and it cannot be copied, so a caller
+/// that drops it has given that up — including a JavaScript wrapper that is collected without
+/// anyone having called `close()`. A server left running then owns a listener, a watcher and its
+/// tasks that nothing can reach, so letting go asks for the same shutdown a caller would.
+///
+/// It is registered the way every other reason is, into the slot that only accepts the first, so a
+/// close or a failure that happened earlier still decides what the server ends as, and the task
+/// that owns the shutdown does the stopping.
+impl Drop for DevServer {
+    fn drop(&mut self) {
+        self.begin_closing();
     }
 }
 
@@ -189,6 +394,12 @@ async fn serve_request(
         return response;
     }
 
+    if uri.path() == CLIENT_PATH {
+        return serve_client();
+    }
+    if uri.path() == EVENTS_PATH {
+        return serve_events(&state);
+    }
     if uri.path() == "/" {
         return serve_root_html(&state.root).await;
     }
@@ -209,13 +420,53 @@ async fn serve_root_html(root: &Path) -> Response<Body> {
         Ok(html) => response(
             StatusCode::OK,
             Some("text/html; charset=utf-8"),
-            Body::from(html),
+            Body::from(reload::with_client_reference(html)),
         ),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             response(StatusCode::NOT_FOUND, None, Body::empty())
         }
         Err(_) => response(StatusCode::INTERNAL_SERVER_ERROR, None, Body::empty()),
     }
+}
+
+/// The built-in client, served from the same listener as the project's own files.
+fn serve_client() -> Response<Body> {
+    no_store(response(
+        StatusCode::OK,
+        Some("text/javascript; charset=utf-8"),
+        Body::from(reload::client_source()),
+    ))
+}
+
+/// The stream a document listens to for the duration of its life.
+///
+/// The stream ends when the server leaves `Running`. That is what allows a shutdown to complete
+/// while pages are connected: an event stream that never ended would hold the graceful shutdown
+/// open until the browser gave up.
+fn serve_events(state: &ServerState) -> Response<Body> {
+    // Falling behind means at least one save was missed, and one load answers all of them.
+    let reloads = BroadcastStream::new(state.reloads.subscribe()).map(|_| StreamItem::Reload);
+    // The current value arrives on subscription, so a request routed after the shutdown began
+    // ends here rather than holding that shutdown open.
+    let closing = WatchStream::new(state.lifecycle.clone()).filter_map(|state| {
+        (!matches!(state, LifecycleState::Running)).then_some(StreamItem::Stop)
+    });
+    let events = reloads.merge(closing).map_while(|item| match item {
+        // A message with no data field is not dispatched to a page, so the event carries its own
+        // name as the payload; the client reacts to the name and ignores the value.
+        StreamItem::Reload => Some(Ok::<Event, Infallible>(
+            Event::default().event(RELOAD_EVENT).data(RELOAD_EVENT),
+        )),
+        StreamItem::Stop => None,
+    });
+    no_store(Sse::new(events).into_response())
+}
+
+/// What an open event stream reacts to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StreamItem {
+    Reload,
+    Stop,
 }
 
 async fn serve_javascript(state: &ServerState, request_path: &str) -> Response<Body> {
@@ -312,10 +563,10 @@ fn response(status: StatusCode, content_type: Option<&str>, body: Body) -> Respo
 #[cfg(test)]
 mod tests {
     use std::{
-        fs::{create_dir_all, write},
+        fs::{create_dir_all, read_to_string, write},
         net::{Ipv4Addr, SocketAddr},
         path::{Path, PathBuf},
-        sync::{Arc, Mutex},
+        sync::Arc,
         time::Duration,
     };
 
@@ -323,11 +574,13 @@ mod tests {
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpStream},
-        sync::{oneshot, watch},
+        sync::watch,
         time::timeout,
     };
 
-    use super::{DevServer, Inner, LifecycleState, ServerError, ServerState};
+    use super::{
+        DevServer, Inner, LifecycleState, ServerError, ServerState, ShutdownCause, ShutdownSlot,
+    };
 
     async fn request(server: &DevServer, method: &str, path: &str) -> String {
         let mut stream = TcpStream::connect(server.address()).await.unwrap();
@@ -361,7 +614,10 @@ mod tests {
     }
 
     fn empty_state() -> Arc<ServerState> {
-        Arc::new(ServerState::new(PathBuf::new()))
+        Arc::new(ServerState::new(
+            PathBuf::new(),
+            watch::channel(LifecycleState::Running).1,
+        ))
     }
 
     fn has_import_edge(server: &DevServer, importer: &str, importee: &str) -> bool {
@@ -382,13 +638,470 @@ mod tests {
         let first = request(&server, "GET", "/").await;
         assert!(first.starts_with("HTTP/1.1 200 OK"));
         assert!(first.contains("content-type: text/html; charset=utf-8"));
-        assert!(first.ends_with("<h1>first</h1>"));
+        assert!(first.contains("<h1>first</h1>"), "{first}");
+        // The project's document is served as written, followed by the built-in client.
+        assert!(
+            first.ends_with("<script type=\"module\" src=\"/@rsvite/client\"></script>\n"),
+            "{first}"
+        );
 
         write_index(root.path(), "<h1>second</h1>");
         let second = request(&server, "GET", "/").await;
-        assert!(second.ends_with("<h1>second</h1>"));
+        assert!(second.contains("<h1>second</h1>"), "{second}");
+        assert!(!second.contains("<h1>first</h1>"), "{second}");
+
+        // The file on disk keeps the HTML the project wrote.
+        let on_disk = read_to_string(root.path().join("index.html")).unwrap();
+        assert_eq!(on_disk, "<h1>second</h1>");
 
         server.close().await.unwrap();
+    }
+
+    /// Opens an event stream and returns the connection with the response head already read.
+    async fn open_event_stream(server: &DevServer) -> (TcpStream, String) {
+        let mut stream = TcpStream::connect(server.address()).await.unwrap();
+        stream
+            .write_all(
+                format!(
+                    "GET /@rsvite/events HTTP/1.1\r\nHost: {}\r\nAccept: text/event-stream\r\n\r\n",
+                    server.address()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut head = Vec::new();
+        let mut byte = [0_u8; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            let read = timeout(Duration::from_secs(5), stream.read(&mut byte))
+                .await
+                .expect("the response head arrives")
+                .unwrap();
+            assert!(read == 1, "the stream closed before its head was complete");
+            head.push(byte[0]);
+        }
+        (stream, String::from_utf8(head).unwrap())
+    }
+
+    /// Waits for the connection to reach its end, returning what arrived first.
+    ///
+    /// A terminating body is bytes followed by end of file, so an ended stream is not a silent
+    /// one: the check is that the peer closes, and that nothing further was sent as an event.
+    async fn read_until_end(stream: &mut TcpStream, patience: Duration) -> String {
+        let mut tail = String::new();
+        let mut buffer = [0_u8; 512];
+        loop {
+            match timeout(patience, stream.read(&mut buffer)).await {
+                Ok(Ok(0)) => return tail,
+                Ok(Ok(read)) => tail.push_str(&String::from_utf8_lossy(&buffer[..read])),
+                Ok(Err(error)) => panic!("event stream failed: {error}"),
+                Err(_) => panic!("the event stream never ended; it received {tail:?}"),
+            }
+        }
+    }
+
+    /// Reads whatever the stream sends next, or gives up.
+    async fn read_from_stream(stream: &mut TcpStream, patience: Duration) -> Option<String> {
+        let mut buffer = [0_u8; 512];
+        match timeout(patience, stream.read(&mut buffer)).await {
+            Ok(Ok(0)) | Err(_) => None,
+            Ok(Ok(read)) => Some(String::from_utf8_lossy(&buffer[..read]).into_owned()),
+            Ok(Err(error)) => panic!("event stream failed: {error}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn refuses_to_start_for_a_document_it_would_serve_but_cannot_follow() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        let canonical = std::fs::canonicalize(root.path()).unwrap();
+        let _refusal = super::root_document::refuse_to_follow(&canonical);
+
+        // The route would read this document and answer with it. Starting anyway would serve it
+        // while nothing watched it, so the server says so instead.
+        let started = DevServer::start(root.path(), 0).await;
+        let error = match started {
+            Ok(_) => panic!("a server started for a document nothing could watch"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(&error, ServerError::Watch { root, message }
+                if root == &canonical && message.contains("cannot be followed")),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn starts_for_a_project_that_has_no_document_yet() {
+        let root = TempDir::new().unwrap();
+        write_project_file(root.path(), "src/main.js", "export const value = 1;\n");
+
+        // A project without a document is a project whose `/` answers `404`, not a failure.
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let response = request(&server, "GET", "/").await;
+        assert!(response.starts_with("HTTP/1.1 404 Not Found"), "{response}");
+        server.close().await.unwrap();
+    }
+    #[tokio::test]
+    async fn refuses_to_start_when_the_watcher_cannot_register() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>unreachable</h1>");
+        // `start` canonicalizes before watching, so the refusal has to name the canonical root.
+        let canonical = std::fs::canonicalize(root.path()).unwrap();
+        let _refusal = super::watcher::refuse_registration_for(&canonical);
+
+        // A known address, so that what the refusal left behind can be looked at afterwards.
+        let probe = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = probe.local_addr().unwrap();
+        drop(probe);
+
+        let started = DevServer::start(root.path(), address.port()).await;
+        let error = match started {
+            Ok(_) => panic!("a server started without a watcher"),
+            Err(error) => error,
+        };
+
+        assert!(
+            matches!(&error, ServerError::Watch { root, .. } if root == &canonical),
+            "{error}"
+        );
+        assert!(
+            error.to_string().contains("failed to watch root"),
+            "{error}"
+        );
+
+        // The listener never reached a running server, so nothing is left holding its address.
+        let rebound = TcpListener::bind(address).await.unwrap();
+        drop(rebound);
+    }
+
+    #[tokio::test]
+    async fn notifications_lost_by_the_watcher_close_the_server_and_reject_wait() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        write_project_file(root.path(), "src/main.js", "export const value = 1;\n");
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let address = server.address();
+        let (mut events, head) = open_event_stream(&server).await;
+        assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+
+        // The next notification under this root arrives the way an overflowed queue does: it says
+        // that notifications were lost, not what changed. It reaches the watcher's own callback,
+        // so this is the production path from notification to shutdown.
+        let canonical = std::fs::canonicalize(root.path()).unwrap();
+        let _lost = super::watcher::lose_notifications_under(&canonical);
+        std::fs::write(canonical.join("src/main.js"), "export const value = 2;\n").unwrap();
+
+        let failure = timeout(Duration::from_secs(5), server.wait())
+            .await
+            .expect("the server finishes shutting down")
+            .unwrap_err();
+        assert!(
+            matches!(&failure, ServerError::Serve(message)
+                if message.contains("file watcher failed")
+                    && message.contains("lost notifications")),
+            "{failure}"
+        );
+
+        // The stream was ended by the shutdown rather than told to reload, and the address is
+        // free again, so the listener and the work behind it were both finished.
+        let tail = read_until_end(&mut events, Duration::from_secs(5)).await;
+        assert!(!tail.contains("event: full-reload"), "{tail}");
+        let rebound = TcpListener::bind(address).await.unwrap();
+        drop(rebound);
+    }
+
+    #[tokio::test]
+    async fn a_watcher_failure_after_readiness_closes_the_server_and_rejects_wait() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let address = server.address();
+        let (mut events, head) = open_event_stream(&server).await;
+        assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+
+        server.inner.shutdown.register(ShutdownCause::WatchFailure(
+            "the watch backend stopped".into(),
+        ));
+
+        let failure = timeout(Duration::from_secs(5), server.wait())
+            .await
+            .expect("the server finishes shutting down")
+            .unwrap_err();
+        assert!(
+            matches!(&failure, ServerError::Serve(message)
+                if message.contains("file watcher failed")
+                    && message.contains("the watch backend stopped")),
+            "{failure}"
+        );
+
+        // The open stream was ended by the shutdown rather than left dangling, and the shutdown
+        // itself is not delivered to the page as a reload.
+        let tail = read_until_end(&mut events, Duration::from_secs(5)).await;
+        assert!(!tail.contains("event: full-reload"), "{tail}");
+        let rebound = TcpListener::bind(address).await.unwrap();
+        drop(rebound);
+    }
+
+    #[tokio::test]
+    async fn one_save_reaches_every_open_stream_from_the_same_listener() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        write_project_file(root.path(), "src/styles.css", "#app { color: red; }\n");
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+
+        // The built-in client and the stream it opens are answered by the same listener as the
+        // project's own files.
+        let client = request(&server, "GET", "/@rsvite/client").await;
+        assert!(client.starts_with("HTTP/1.1 200 OK"), "{client}");
+        assert!(
+            client.contains("content-type: text/javascript; charset=utf-8"),
+            "{client}"
+        );
+        assert!(client.contains("cache-control: no-store"), "{client}");
+        assert!(client.contains("/@rsvite/events"), "{client}");
+
+        let (mut first, first_head) = open_event_stream(&server).await;
+        let (mut second, second_head) = open_event_stream(&server).await;
+        for head in [&first_head, &second_head] {
+            assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+            assert!(head.contains("content-type: text/event-stream"), "{head}");
+            assert!(head.contains("cache-control: no-store"), "{head}");
+        }
+
+        write_project_file(root.path(), "src/styles.css", "#app { color: blue; }\n");
+
+        for stream in [&mut first, &mut second] {
+            let received = read_from_stream(stream, Duration::from_secs(10))
+                .await
+                .expect("an open stream is told about the save");
+            assert!(received.contains("event: full-reload"), "{received}");
+            // A message without a data field is not dispatched to a page, so a frame that only
+            // names the event would reach the browser and be discarded by it.
+            assert!(received.contains("data:"), "{received}");
+        }
+
+        server.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_save_reloads_without_changing_module_graph_state() {
+        let root = TempDir::new().unwrap();
+        write_index(
+            root.path(),
+            "<script type=\"module\" src=\"/src/main.js\"></script>",
+        );
+        write_project_file(root.path(), "src/main.js", "import './message';\n");
+        write_project_file(
+            root.path(),
+            "src/message.js",
+            "export const message = 'a';\n",
+        );
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+
+        assert!(
+            request(&server, "GET", "/src/main.js")
+                .await
+                .starts_with("HTTP/1.1 200 OK")
+        );
+        assert!(has_import_edge(&server, "src/main.js", "src/message.js"));
+
+        let (mut events, _) = open_event_stream(&server).await;
+        write_project_file(root.path(), "src/styles.css", "#app { color: red; }\n");
+        let received = read_from_stream(&mut events, Duration::from_secs(10))
+            .await
+            .expect("the save reaches the open stream");
+        assert!(received.contains("event: full-reload"), "{received}");
+
+        // The reload channel carries no graph state: the edge recorded by the last request is the
+        // edge that is still there, and the following document load is what replaces it.
+        assert!(has_import_edge(&server, "src/main.js", "src/message.js"));
+
+        server.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_failure_that_arrived_before_the_close_request_still_ends_the_server() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+
+        // The failure is already waiting when the request is made, so it is what happened first
+        // and it is what a caller is told about, rather than being lost to the request.
+        server.inner.shutdown.register(ShutdownCause::WatchFailure(
+            "the watch backend stopped".into(),
+        ));
+        server.begin_closing();
+
+        let failure = timeout(Duration::from_secs(5), server.wait())
+            .await
+            .expect("the server finishes shutting down")
+            .unwrap_err();
+        assert!(
+            matches!(&failure, ServerError::Serve(message)
+                if message.contains("file watcher failed")
+                    && message.contains("the watch backend stopped")),
+            "{failure}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stream_routed_after_the_shutdown_began_does_not_hold_it_open() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+
+        // A connection the server has accepted, carrying a request that is not finished yet.
+        let mut pending = TcpStream::connect(server.address()).await.unwrap();
+        pending
+            .write_all(
+                format!(
+                    "GET /@rsvite/events HTTP/1.1\r\nHost: {}\r\n",
+                    server.address()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        pending.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        server.begin_closing();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        // The request is only routed now, after the shutdown began. A stream that learned about
+        // closing from a one-time message would never hear it and would hold the shutdown open.
+        pending.write_all(b"\r\n").await.unwrap();
+        pending.flush().await.unwrap();
+
+        timeout(Duration::from_secs(5), server.wait())
+            .await
+            .expect("the shutdown finishes with a stream routed into it")
+            .expect("a requested shutdown succeeds");
+    }
+
+    #[tokio::test]
+    async fn a_fatal_failure_stops_the_watcher_before_wait_rejects() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        write_project_file(root.path(), "src/styles.css", "#app { color: red; }\n");
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+
+        server.inner.shutdown.register(ShutdownCause::WatchFailure(
+            "the watch backend stopped".into(),
+        ));
+        let failure = timeout(Duration::from_secs(5), server.wait())
+            .await
+            .expect("the server finishes shutting down")
+            .unwrap_err();
+        assert!(
+            matches!(&failure, ServerError::Serve(message) if message.contains("file watcher failed")),
+            "{failure}"
+        );
+
+        // Cleanup happened before that rejection, so nothing is watching a project the server
+        // has already given up on.
+        let mut reloads = server.inner.state.reloads.subscribe();
+        write_project_file(root.path(), "src/styles.css", "#app { color: blue; }\n");
+        assert!(
+            timeout(Duration::from_secs(2), reloads.recv())
+                .await
+                .is_err(),
+            "a save still reached the server after it failed"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failure_that_happened_after_the_close_request_does_not_replace_it() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+
+        // The request is registered where it happens, so a failure reported afterwards — in the
+        // same turn, before anything has been polled — is second and does not become the reason.
+        server.begin_closing();
+        server.inner.shutdown.register(ShutdownCause::WatchFailure(
+            "the watch backend stopped".into(),
+        ));
+
+        timeout(Duration::from_secs(5), server.wait())
+            .await
+            .expect("the server finishes shutting down")
+            .expect("the shutdown a caller asked for succeeds");
+    }
+
+    #[tokio::test]
+    async fn a_listener_that_ends_on_its_own_finishes_the_server() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let address = server.address();
+        let (mut events, _) = open_event_stream(&server).await;
+
+        // Nobody asked to close and the watcher is healthy, but the listener is gone. A server
+        // that only waited for those two reasons would report that it is still running.
+        server.inner.serving_abort.abort();
+
+        let ended = timeout(Duration::from_secs(5), server.wait())
+            .await
+            .expect("the server finishes rather than waiting for a reason it will never get");
+        // What the listener reported is what a caller is told, rather than a clean close or a
+        // reason borrowed from somewhere else.
+        let reported = match ended {
+            Ok(()) => panic!("a lost listener is not a clean close"),
+            Err(ServerError::Serve(message)) => message,
+            Err(other) => panic!("unexpected error: {other}"),
+        };
+        assert!(reported.contains("cancel"), "{reported}");
+        assert!(
+            matches!(
+                &*server.inner.lifecycle.borrow(),
+                LifecycleState::Failed(state) if state == &reported
+            ),
+            "the server still reports that it is running"
+        );
+
+        // The same cleanup ran: the stream ended and the address is free again.
+        let tail = read_until_end(&mut events, Duration::from_secs(5)).await;
+        assert!(!tail.contains("event: full-reload"), "{tail}");
+        let rebound = TcpListener::bind(address).await.unwrap();
+        drop(rebound);
+    }
+
+    #[tokio::test]
+    async fn a_close_request_with_a_live_watcher_finishes_cleanly() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        write_project_file(root.path(), "src/styles.css", "#app { color: red; }\n");
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+
+        // The watcher is stopped by the shutdown itself, so whatever it reports on the way out
+        // cannot turn an ordinary close into a failure.
+        timeout(Duration::from_secs(5), server.close())
+            .await
+            .expect("the server finishes shutting down")
+            .expect("a requested shutdown succeeds");
+    }
+
+    #[tokio::test]
+    async fn close_finishes_with_open_event_streams_and_releases_the_port() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let address = server.address();
+        let (mut first, _) = open_event_stream(&server).await;
+        let (mut second, _) = open_event_stream(&server).await;
+
+        timeout(Duration::from_secs(5), server.close())
+            .await
+            .expect("close finishes while streams are open")
+            .unwrap();
+
+        for stream in [&mut first, &mut second] {
+            let tail = read_until_end(stream, Duration::from_secs(5)).await;
+            assert!(!tail.contains("event: full-reload"), "{tail}");
+        }
+        let rebound = TcpListener::bind(address).await.unwrap();
+        drop(rebound);
     }
 
     #[tokio::test]
@@ -1082,6 +1795,33 @@ mod tests {
         ));
     }
 
+    /// The handle is the only way to ask this server to stop, so a caller that lets go of it
+    /// without closing has left a listener, a watcher and their tasks that nothing can reach. That
+    /// is what happens when a JavaScript wrapper is collected, and it has to end the server.
+    #[tokio::test]
+    async fn dropping_the_last_handle_closes_the_server_and_releases_the_port() {
+        let root = TempDir::new().unwrap();
+        write_index(root.path(), "<h1>served</h1>");
+        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let address = server.address();
+        assert!(request(&server, "GET", "/").await.contains("200 OK"));
+
+        // Nobody asked it to stop; there is simply nobody left who could.
+        drop(server);
+
+        let rebound = timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(listener) = TcpListener::bind(address).await {
+                    return listener;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the address is free again once the last handle is gone");
+        drop(rebound);
+    }
+
     #[tokio::test]
     async fn close_waits_for_shutdown_and_releases_the_port() {
         let root = TempDir::new().unwrap();
@@ -1100,14 +1840,14 @@ mod tests {
 
     #[tokio::test]
     async fn close_preserves_a_failure_reported_by_the_server_task() {
-        let (shutdown, _shutdown_receiver) = oneshot::channel();
         let (_lifecycle_sender, lifecycle) =
             watch::channel(LifecycleState::Failed("serve failed".into()));
         let server = DevServer {
             inner: Inner {
                 address: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
-                shutdown: Mutex::new(Some(shutdown)),
                 lifecycle,
+                shutdown: Arc::new(ShutdownSlot::default()),
+                serving_abort: tokio::spawn(std::future::pending::<()>()).abort_handle(),
                 state: empty_state(),
             },
         };
@@ -1121,14 +1861,14 @@ mod tests {
 
     #[tokio::test]
     async fn wait_rejects_if_the_server_task_stops_without_a_final_state() {
-        let (shutdown, _shutdown_receiver) = oneshot::channel();
         let (lifecycle_sender, lifecycle) = watch::channel(LifecycleState::Running);
         drop(lifecycle_sender);
         let server = DevServer {
             inner: Inner {
                 address: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
-                shutdown: Mutex::new(Some(shutdown)),
                 lifecycle,
+                shutdown: Arc::new(ShutdownSlot::default()),
+                serving_abort: tokio::spawn(std::future::pending::<()>()).abort_handle(),
                 state: empty_state(),
             },
         };
