@@ -33,6 +33,16 @@ The first C1 configuration slice has Node as the one-time configuration evaluato
 This configuration slice is intentionally not a generic configuration layer: explicit paths, TypeScript/config bundling, mode selection, `.env` loading, aliases, host and strict-port settings, plugins, callbacks, config-file watching or restart, build, preview, and programmatic APIs stay later evidence-scoped work.
 <!-- Author: rsvite-engineer -->
 
+## First C2 Plugin API slice
+
+The first C2 slice adds one selected hook and nothing around it. A project may declare at most one plugin whose `transformIndexHtml` is an object with exactly `{ order: "pre", handler }`, producing its replacement synchronously. The declaration is read by what it holds, so an entry behind a getter, a symbol key, or a key beyond the list's own entries and length is refused with every other unsupported shape. Node validates that declaration before readiness and runs the handler for every successful root request; Rust keeps reading `index.html`, owning the response, watching, reloads and the server's lifetime. Only the document text crosses into Rust and only a replacement comes back, so no plugin object, configuration value or path context reaches it, and the built-in client reference is appended after the hook. A non-empty string is the transformed document; `undefined` or an empty string keeps the one the project wrote. Any other result, and any thrown value, is one controlled `500` naming the plugin rather than an untransformed document or a stopped server. The callback lives exactly as long as the server: closing it and letting go of the last wrapper both release it through the same owned shutdown, free the port, and leave the process able to end.
+
+<!-- Author: rsvite-senior-engineer -->
+
+This slice is deliberately one hook: a second plugin, other hook orders, the function form, asynchronous hooks, tag descriptors, plugin context, other Plugin API hooks, other HTML routes, an HTML parser, build, preview, Runtime and programmatic APIs all stay later evidence-scoped work. The pinned upstream `playground/html` case needs unsupported configuration fields, hook forms and tag injection, so its recorded result is unchanged.
+
+<!-- Author: rsvite-senior-engineer -->
+
 ## Later directions
 
 - Expand C1 only from a new evidence-scoped configuration behavior that preserves the C1 static-port boundary and records any necessary N-API representation decision.

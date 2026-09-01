@@ -701,6 +701,25 @@ describe("C1 Vite configuration", () => {
     await provePortCanRebind(port);
   });
 
+  /**
+   * The same three steps decide the text of a configuration failure.
+   *
+   * A rejected reason that throws when asked for its message is still asked what it converts
+   * to, so the fixed description is kept for a value that answers neither.
+   */
+  test("a rejected reason that refuses a message is reported by its text form", async () => {
+    const source = [
+      'const refused = { toString: () => "converted" };',
+      'Object.defineProperty(refused, "message", { get() { throw new Error("no message"); } });',
+      "export default Promise.reject(refused);",
+      "",
+    ].join("\n");
+
+    const result = await expectConfigurationFailure({ source, message: "converted" });
+
+    expect(result.stderr).toBe("rsvite: failed to evaluate vite.config.js: converted\n");
+  });
+
   test("uses the startup Promise handler after config code replaces Promise.prototype.then", async () => {
     const root = await createFixture({ "package.json": '{"type":"module"}\n' });
     const marker = join(root, "replaced-promise-then-called");

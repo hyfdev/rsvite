@@ -43,7 +43,10 @@ pub(crate) fn client_source() -> &'static str {
     CLIENT_SOURCE
 }
 
-/// The document as the project wrote it, followed by the built-in client.
+/// The document this response was built from, followed by the built-in client.
+///
+/// What arrives here is whatever the root request selected: the project's own bytes, or the
+/// replacement a declared hook returned for them.
 pub(crate) fn with_client_reference(mut document: Vec<u8>) -> Vec<u8> {
     document.extend_from_slice(CLIENT_TAG.as_bytes());
     document
