@@ -1,7 +1,9 @@
 use std::{
     convert::Infallible,
+    future::Future,
     net::{Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
+    pin::Pin,
     sync::{Arc, Mutex},
 };
 
@@ -148,6 +150,16 @@ impl ShutdownSlot {
     }
 }
 
+/// The one HTML transformation a project may declare, as this server sees it.
+///
+/// Everything about the plugin — its name, the shape it had to have, what its hook returned and
+/// how a failure reads — is decided where that code runs. What crosses into this server is a
+/// single call: the document as text in, the document to serve back out, or the text of one
+/// failure. No plugin object, configuration value or path context is on this side of the call.
+pub type TransformIndexHtml = Box<
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>> + Send + Sync,
+>;
+
 struct ServerState {
     root: PathBuf,
     module_graph: Mutex<ModuleGraph>,
@@ -155,12 +167,21 @@ struct ServerState {
     // Closing is state, not an event. A stream that subscribes after a shutdown has begun reads
     // the current value and ends immediately, which an event sent once would never reach.
     lifecycle: watch::Receiver<LifecycleState>,
+    // Held for exactly as long as this server serves. Whatever the caller gave is let go when the
+    // state is, so nothing this server holds keeps that caller's work alive after the last
+    // request has been answered.
+    transform_index_html: Option<TransformIndexHtml>,
 }
 
 impl ServerState {
-    fn new(root: PathBuf, lifecycle: watch::Receiver<LifecycleState>) -> Self {
+    fn new(
+        root: PathBuf,
+        lifecycle: watch::Receiver<LifecycleState>,
+        transform_index_html: Option<TransformIndexHtml>,
+    ) -> Self {
         Self {
             root,
+            transform_index_html,
             module_graph: Mutex::new(ModuleGraph::default()),
             // A reload nobody is open to receive is not kept: the next document load reads
             // the current files anyway.
@@ -182,7 +203,17 @@ pub struct DevServer {
 }
 
 impl DevServer {
-    pub async fn start(root: impl AsRef<Path>, port: u16) -> Result<Self, ServerError> {
+    /// Starts serving `root`, transforming the root document through `transform_index_html`
+    /// when the caller supplied one.
+    ///
+    /// The transformation is held for exactly as long as this server serves and is let go with it,
+    /// so a caller that has stopped this server, or has let go of its handle, is not still being
+    /// called back into.
+    pub async fn start(
+        root: impl AsRef<Path>,
+        port: u16,
+        transform_index_html: Option<TransformIndexHtml>,
+    ) -> Result<Self, ServerError> {
         let requested_root = root.as_ref().to_path_buf();
         let canonical_root = tokio::fs::canonicalize(&requested_root)
             .await
@@ -207,7 +238,11 @@ impl DevServer {
             .local_addr()
             .map_err(|source| ServerError::Bind { port, source })?;
         let (task_lifecycle, lifecycle) = watch::channel(LifecycleState::Running);
-        let state = Arc::new(ServerState::new(canonical_root.clone(), lifecycle.clone()));
+        let state = Arc::new(ServerState::new(
+            canonical_root.clone(),
+            lifecycle.clone(),
+            transform_index_html,
+        ));
 
         // Watching starts before this function returns, so the readiness the CLI prints means
         // both that the listener accepts requests and that a save will be seen. The project is
@@ -401,7 +436,7 @@ async fn serve_request(
         return serve_events(&state);
     }
     if uri.path() == "/" {
-        return serve_root_html(&state.root).await;
+        return serve_root_html(&state).await;
     }
     if uri.path().ends_with(".js") || uri.path().ends_with(".ts") {
         return serve_javascript(&state, uri.path()).await;
@@ -415,18 +450,55 @@ async fn serve_request(
     }
 }
 
-async fn serve_root_html(root: &Path) -> Response<Body> {
-    match tokio::fs::read(root.join("index.html")).await {
-        Ok(html) => response(
+/// The document `GET /` answers with, transformed first if the project declared a hook.
+///
+/// The file is read again for every request, so what a page is given is what the project holds
+/// now; nothing transformed is kept between requests. A project that declared no hook is answered
+/// with the bytes it wrote, byte for byte — reading them as text is only done
+/// for a project that asked for its document to be transformed, and a document that is not text
+/// cannot be handed to a hook that takes a string.
+///
+/// The built-in client reference is appended after the hook, so what a hook is given is the
+/// project's own document and nothing this server adds to it.
+async fn serve_root_html(state: &ServerState) -> Response<Body> {
+    let html = match tokio::fs::read(state.root.join("index.html")).await {
+        Ok(html) => html,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return response(StatusCode::NOT_FOUND, None, Body::empty());
+        }
+        Err(_) => return response(StatusCode::INTERNAL_SERVER_ERROR, None, Body::empty()),
+    };
+    let Some(transform) = state.transform_index_html.as_ref() else {
+        return response(
             StatusCode::OK,
             Some("text/html; charset=utf-8"),
             Body::from(reload::with_client_reference(html)),
+        );
+    };
+    let Ok(source) = String::from_utf8(html) else {
+        return hook_failure("index.html is not valid UTF-8".to_owned());
+    };
+    match transform(source).await {
+        Ok(transformed) => response(
+            StatusCode::OK,
+            Some("text/html; charset=utf-8"),
+            Body::from(reload::with_client_reference(transformed.into_bytes())),
         ),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            response(StatusCode::NOT_FOUND, None, Body::empty())
-        }
-        Err(_) => response(StatusCode::INTERNAL_SERVER_ERROR, None, Body::empty()),
+        Err(message) => hook_failure(message),
     }
+}
+
+/// A root request the declared hook could not answer for.
+///
+/// It says what happened and which plugin it happened in, because that text is what the caller
+/// wrote for exactly this. The document is not served untransformed instead: a project that asked
+/// for its document to be transformed is not given one that was not.
+fn hook_failure(message: String) -> Response<Body> {
+    no_store(response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Some("text/plain; charset=utf-8"),
+        Body::from(format!("rsvite: {message}\n")),
+    ))
 }
 
 /// The built-in client, served from the same listener as the project's own files.
@@ -617,6 +689,7 @@ mod tests {
         Arc::new(ServerState::new(
             PathBuf::new(),
             watch::channel(LifecycleState::Running).1,
+            None,
         ))
     }
 
@@ -633,7 +706,7 @@ mod tests {
     async fn serves_the_root_html_from_rust_on_every_request() {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>first</h1>");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         let first = request(&server, "GET", "/").await;
         assert!(first.starts_with("HTTP/1.1 200 OK"));
@@ -719,7 +792,7 @@ mod tests {
 
         // The route would read this document and answer with it. Starting anyway would serve it
         // while nothing watched it, so the server says so instead.
-        let started = DevServer::start(root.path(), 0).await;
+        let started = DevServer::start(root.path(), 0, None).await;
         let error = match started {
             Ok(_) => panic!("a server started for a document nothing could watch"),
             Err(error) => error,
@@ -737,7 +810,7 @@ mod tests {
         write_project_file(root.path(), "src/main.js", "export const value = 1;\n");
 
         // A project without a document is a project whose `/` answers `404`, not a failure.
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
         let response = request(&server, "GET", "/").await;
         assert!(response.starts_with("HTTP/1.1 404 Not Found"), "{response}");
         server.close().await.unwrap();
@@ -755,7 +828,7 @@ mod tests {
         let address = probe.local_addr().unwrap();
         drop(probe);
 
-        let started = DevServer::start(root.path(), address.port()).await;
+        let started = DevServer::start(root.path(), address.port(), None).await;
         let error = match started {
             Ok(_) => panic!("a server started without a watcher"),
             Err(error) => error,
@@ -780,7 +853,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>served</h1>");
         write_project_file(root.path(), "src/main.js", "export const value = 1;\n");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
         let address = server.address();
         let (mut events, head) = open_event_stream(&server).await;
         assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
@@ -815,7 +888,7 @@ mod tests {
     async fn a_watcher_failure_after_readiness_closes_the_server_and_rejects_wait() {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>served</h1>");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
         let address = server.address();
         let (mut events, head) = open_event_stream(&server).await;
         assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
@@ -848,7 +921,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>served</h1>");
         write_project_file(root.path(), "src/styles.css", "#app { color: red; }\n");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         // The built-in client and the stream it opens are answered by the same listener as the
         // project's own files.
@@ -897,7 +970,7 @@ mod tests {
             "src/message.js",
             "export const message = 'a';\n",
         );
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         assert!(
             request(&server, "GET", "/src/main.js")
@@ -924,7 +997,7 @@ mod tests {
     async fn a_failure_that_arrived_before_the_close_request_still_ends_the_server() {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>served</h1>");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         // The failure is already waiting when the request is made, so it is what happened first
         // and it is what a caller is told about, rather than being lost to the request.
@@ -949,7 +1022,7 @@ mod tests {
     async fn a_stream_routed_after_the_shutdown_began_does_not_hold_it_open() {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>served</h1>");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         // A connection the server has accepted, carrying a request that is not finished yet.
         let mut pending = TcpStream::connect(server.address()).await.unwrap();
@@ -984,7 +1057,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>served</h1>");
         write_project_file(root.path(), "src/styles.css", "#app { color: red; }\n");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         server.inner.shutdown.register(ShutdownCause::WatchFailure(
             "the watch backend stopped".into(),
@@ -1014,7 +1087,7 @@ mod tests {
     async fn a_failure_that_happened_after_the_close_request_does_not_replace_it() {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>served</h1>");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         // The request is registered where it happens, so a failure reported afterwards — in the
         // same turn, before anything has been polled — is second and does not become the reason.
@@ -1033,7 +1106,7 @@ mod tests {
     async fn a_listener_that_ends_on_its_own_finishes_the_server() {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>served</h1>");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
         let address = server.address();
         let (mut events, _) = open_event_stream(&server).await;
 
@@ -1072,7 +1145,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>served</h1>");
         write_project_file(root.path(), "src/styles.css", "#app { color: red; }\n");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         // The watcher is stopped by the shutdown itself, so whatever it reports on the way out
         // cannot turn an ordinary close into a failure.
@@ -1086,7 +1159,7 @@ mod tests {
     async fn close_finishes_with_open_event_streams_and_releases_the_port() {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>served</h1>");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
         let address = server.address();
         let (mut first, _) = open_event_stream(&server).await;
         let (mut second, _) = open_event_stream(&server).await;
@@ -1117,7 +1190,7 @@ mod tests {
             "assets/mark.svg",
             "<svg xmlns=\"http://www.w3.org/2000/svg\"><circle r=\"1\" /></svg>\n",
         );
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         let css = request(&server, "GET", "/src/styles.css").await;
         assert!(css.starts_with("HTTP/1.1 200 OK"), "{css}");
@@ -1164,7 +1237,7 @@ mod tests {
     async fn resolves_percent_encoded_resource_names_including_the_extension() {
         let root = TempDir::new().unwrap();
         write_project_file(root.path(), "src/a b.css", "#app { color: red; }\n");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         let spaced = request(&server, "GET", "/src/a%20b.css").await;
         assert!(spaced.starts_with("HTTP/1.1 200 OK"), "{spaced}");
@@ -1193,7 +1266,7 @@ mod tests {
     async fn refuses_malformed_percent_encoding_in_a_resource_request() {
         let root = TempDir::new().unwrap();
         write_project_file(root.path(), "src/styles.css", "#app { color: red; }\n");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         // A resource request that cannot be decoded is malformed. Reading it leniently would
         // answer it as a request for a file named after the mistake.
@@ -1243,7 +1316,7 @@ mod tests {
             root.path().join("src/disguised.js"),
         )
         .unwrap();
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         // Canonicalizing a file in the module graph reports module-file diagnostics, whether a
         // request or an import reached the file.
@@ -1282,7 +1355,7 @@ mod tests {
         );
         write_project_file(root.path(), "src/main.js", "document.title = \"served\";\n");
         write_project_file(root.path(), "src/theme.txt", "not a stylesheet\n");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         let module = request(&server, "GET", "/src/main.js").await;
         assert!(module.starts_with("HTTP/1.1 200 OK"), "{module}");
@@ -1325,7 +1398,7 @@ mod tests {
         // which is the internal-failure branch, on every run.
         std::os::unix::fs::symlink("cycle-b.css", root.path().join("src/cycle-a.css")).unwrap();
         std::os::unix::fs::symlink("cycle-a.css", root.path().join("src/cycle-b.css")).unwrap();
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         let response = request(&server, "GET", "/src/cycle-a.css").await;
         assert!(response.starts_with("HTTP/1.1 500"), "{response}");
@@ -1367,7 +1440,7 @@ mod tests {
             root.path().join("src/disguised.css"),
         )
         .unwrap();
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         for (path, expected) in [
             ("/src/../outside.css", "HTTP/1.1 400"),
@@ -1420,7 +1493,7 @@ mod tests {
             "src/nested/main.js",
             "import { message } from '../message';\nvoid message;\n",
         );
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         let main = request(&server, "GET", "/src/main.js").await;
         assert!(main.starts_with("HTTP/1.1 200 OK"), "{main}");
@@ -1498,7 +1571,7 @@ mod tests {
             "src/next.ts",
             "export const next: string = 'next';\n",
         );
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         let main = request(&server, "GET", "/src/main.ts").await;
         assert!(main.starts_with("HTTP/1.1 200 OK"), "{main}");
@@ -1554,7 +1627,7 @@ mod tests {
             "src/next.ts",
             "export const next: string = 'next';\n",
         );
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         let successful = request(&server, "GET", "/src/main.ts").await;
         assert!(successful.starts_with("HTTP/1.1 200 OK"), "{successful}");
@@ -1646,7 +1719,7 @@ mod tests {
             )
             .unwrap();
         }
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         for extension in ["js", "ts"] {
             let main_file = format!("src/main.{extension}");
@@ -1747,7 +1820,7 @@ mod tests {
     #[tokio::test]
     async fn returns_declared_http_failures() {
         let root = TempDir::new().unwrap();
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
 
         assert!(
             request(&server, "GET", "/")
@@ -1781,7 +1854,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let missing = root.path().join("missing");
         assert!(matches!(
-            DevServer::start(&missing, 0).await,
+            DevServer::start(&missing, 0, None).await,
             Err(ServerError::ResolveRoot { .. })
         ));
 
@@ -1790,7 +1863,7 @@ mod tests {
             .unwrap();
         let port = occupied.local_addr().unwrap().port();
         assert!(matches!(
-            DevServer::start(root.path(), port).await,
+            DevServer::start(root.path(), port, None).await,
             Err(ServerError::Bind { .. })
         ));
     }
@@ -1802,7 +1875,7 @@ mod tests {
     async fn dropping_the_last_handle_closes_the_server_and_releases_the_port() {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "<h1>served</h1>");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
         let address = server.address();
         assert!(request(&server, "GET", "/").await.contains("200 OK"));
 
@@ -1826,7 +1899,7 @@ mod tests {
     async fn close_waits_for_shutdown_and_releases_the_port() {
         let root = TempDir::new().unwrap();
         write_index(root.path(), "ok");
-        let server = DevServer::start(root.path(), 0).await.unwrap();
+        let server = DevServer::start(root.path(), 0, None).await.unwrap();
         let address = server.address();
 
         timeout(Duration::from_secs(2), server.close())

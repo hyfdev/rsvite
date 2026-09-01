@@ -13,6 +13,7 @@ const pnpmBin = resolve(repositoryRoot, "node_modules/.bin/rsvite");
 const htmlFixtureRoot = resolve(repositoryRoot, "fixtures/m1-basic-html");
 const typescriptFixtureRoot = resolve(repositoryRoot, "fixtures/m1-basic-typescript");
 const cssAssetFixtureRoot = resolve(repositoryRoot, "fixtures/m1-basic-css-assets");
+const htmlTransformFixtureRoot = resolve(repositoryRoot, "fixtures/c2-html-transform");
 
 /**
  * Waits until the page is listening for saves again.
@@ -689,5 +690,67 @@ test("a document outside the project reloads the open page when it changes", asy
     });
   } finally {
     await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("a declared pre hook wraps the project's fragment before the browser loads it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rsvite-c2-html-"));
+  await cp(htmlTransformFixtureRoot, root, { recursive: true });
+  const source = await readFile(join(root, "index.html"), "utf8");
+  const hookLog = join(root, "hook-calls.log");
+  const child = spawn(pnpmBin, [root, "--port", "0"], {
+    cwd: repositoryRoot,
+    env: { ...process.env, RSVITE_FIXTURE_HOOK_LOG: hookLog },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const exit = waitForExit(child);
+  let browser;
+
+  try {
+    const { origin, port } = await waitForAddress(child);
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    const errors = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("requestfailed", (request) => {
+      errors.push(`${request.url()} ${request.failure()?.errorText ?? "failed"}`);
+    });
+
+    const clientResponse = page.waitForResponse(
+      (candidate) => new URL(candidate.url()).pathname === "/@rsvite/client",
+    );
+    const response = await page.goto(`${origin}/`);
+    expect(response?.status()).toBe(200);
+    expect(response?.headers()["content-type"]).toBe("text/html; charset=utf-8");
+
+    // The browser was given the wrapped document, not the fragment the project holds.
+    await expect(page.title()).resolves.toBe("wrapped");
+    await expect(page.textContent("#app")).resolves.toBe("fragment");
+    await expect(
+      page.evaluate(() => document.querySelector("body > div#app") !== null),
+    ).resolves.toBe(true);
+
+    // The built-in client is served from the same document, and was added after the hook ran.
+    expect((await clientResponse).status()).toBe(200);
+    const invocations = (await readFile(hookLog, "utf8")).trim().split("\n");
+    expect(invocations).toEqual([`/index.html ${join(root, "index.html")} false`]);
+
+    // Serving the document did not rewrite it.
+    await expect(readFile(join(root, "index.html"), "utf8")).resolves.toBe(source);
+    expect(errors).toEqual([]);
+
+    await browser.close();
+    browser = undefined;
+    child.kill("SIGTERM");
+    await expect(exit).resolves.toEqual({ code: 0, signal: null });
+    await provePortCanRebind(port);
+  } finally {
+    await browser?.close();
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    await exit.catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
   }
 });

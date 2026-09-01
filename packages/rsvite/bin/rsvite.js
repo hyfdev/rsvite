@@ -65,12 +65,25 @@ function configurationError(message) {
   throw new Error(`invalid vite.config.js: ${message}`);
 }
 
+/**
+ * The text a failure is reported with, in three steps.
+ *
+ * A string `message` is what the value says about itself, so it wins. Otherwise the value is
+ * asked for its text form. Only a value that answers neither — one whose conversion throws — is
+ * reported by a fixed description. Reading the message is asked separately from converting the
+ * value, because a value that refuses to produce a message may still have a text form worth
+ * reporting.
+ */
 function errorMessage(error) {
-  try {
-    if (error !== null && (typeof error === "object" || typeof error === "function")) {
+  if (error !== null && (typeof error === "object" || typeof error === "function")) {
+    try {
       const message = error.message;
       if (typeof message === "string") return message;
+    } catch {
+      // Asked and refused. What the value converts to is a separate question, asked next.
     }
+  }
+  try {
     return String(error);
   } catch {
     return "error value cannot be converted to text";
@@ -84,6 +97,17 @@ function createConfigEnv() {
     isSsrBuild: false,
     isPreview: false,
   };
+}
+
+/**
+ * Takes the rejection of a Promise this server was handed but will not use.
+ *
+ * A Promise that rejects with nobody listening ends the process. This server was given the value,
+ * so it is the one that has to listen, even though the value itself is not something it accepts.
+ * The handler taken at startup is used so a project's own `then` cannot decide what happens here.
+ */
+function takeRejection(promise) {
+  void Reflect.apply(nativePromiseThen, promise, [undefined, () => {}]);
 }
 
 function isPlainObject(value) {
@@ -118,20 +142,121 @@ function validateConfiguration(value) {
     configurationError("must default-export a plain object");
   }
 
-  validateKeys(value, ["server"], "configuration");
+  validateKeys(value, ["server", "plugins"], "configuration");
+  const plugin = validatePlugins(value);
   const server = ownDataProperty(value, "server", "configuration");
-  if (!server.present) return {};
+  if (!server.present) return { plugin };
   if (!isPlainObject(server.value)) {
     configurationError("configuration.server must be a plain object");
   }
 
   validateKeys(server.value, ["port"], "configuration.server");
   const port = ownDataProperty(server.value, "port", "configuration.server");
-  if (!port.present) return {};
+  if (!port.present) return { plugin };
   if (!Number.isInteger(port.value) || port.value < 0 || port.value > 65535) {
     configurationError("configuration.server.port must be an integer from 0 through 65535");
   }
-  return { port: port.value };
+  return { port: port.value, plugin };
+}
+
+/**
+ * The one plugin this compatibility level accepts, or nothing.
+ *
+ * Every shape outside that one is refused by name rather than ignored, because a plugin silently
+ * dropped is a project that believes its document is being transformed when it is not. The list
+ * may be absent or empty; beyond that it holds exactly one plain object declaring exactly a name
+ * and a pre-ordered `transformIndexHtml` handler.
+ */
+function validatePlugins(value) {
+  const plugins = ownDataProperty(value, "plugins", "configuration");
+  if (!plugins.present) return undefined;
+  if (!Array.isArray(plugins.value)) {
+    configurationError("configuration.plugins must be an array");
+  }
+  // The list is read the same way every other configuration value is: by what it holds, not by
+  // what it computes when asked. A list that answers with a getter, or carries a key beyond its
+  // own entries and length, is a shape this level refuses rather than one it quietly resolves.
+  const length = ownDataProperty(plugins.value, "length", "configuration.plugins");
+  if (!length.present || length.value > 1) {
+    configurationError("configuration.plugins accepts at most one plugin");
+  }
+  validateKeys(
+    plugins.value,
+    length.value === 0 ? ["length"] : ["0", "length"],
+    "configuration.plugins",
+  );
+  if (length.value === 0) return undefined;
+  const entry = ownDataProperty(plugins.value, "0", "configuration.plugins").value;
+  if (!isPlainObject(entry)) {
+    configurationError("configuration.plugins[0] must be a plain object");
+  }
+  validateKeys(entry, ["name", "transformIndexHtml"], "configuration.plugins[0]");
+
+  const name = ownDataProperty(entry, "name", "configuration.plugins[0]");
+  if (!name.present || typeof name.value !== "string" || name.value === "") {
+    configurationError("configuration.plugins[0].name must be a non-empty string");
+  }
+
+  const hook = ownDataProperty(entry, "transformIndexHtml", "configuration.plugins[0]");
+  if (!hook.present || !isPlainObject(hook.value)) {
+    configurationError(
+      "configuration.plugins[0].transformIndexHtml must be an object with order and handler",
+    );
+  }
+  validateKeys(hook.value, ["order", "handler"], "configuration.plugins[0].transformIndexHtml");
+  const order = ownDataProperty(hook.value, "order", "configuration.plugins[0].transformIndexHtml");
+  if (!order.present || order.value !== "pre") {
+    configurationError('configuration.plugins[0].transformIndexHtml.order must be "pre"');
+  }
+  const handler = ownDataProperty(
+    hook.value,
+    "handler",
+    "configuration.plugins[0].transformIndexHtml",
+  );
+  if (!handler.present || typeof handler.value !== "function") {
+    configurationError("configuration.plugins[0].transformIndexHtml.handler must be a function");
+  }
+  return { name: name.value, handler: handler.value };
+}
+
+/**
+ * The single call this server makes into project code for a root document.
+ *
+ * The hook is given the document as the project wrote it and the names a request reaches it by,
+ * and nothing else: no plugin object, no configuration, and no context this compatibility level
+ * does not support. Those names are built for each call, so what one request's hook does to what
+ * it was given cannot decide what the next request's hook is given.
+ *
+ * A document comes back as text. A hook that throws, or answers with something this level does
+ * not accept, fails that one request as one message naming the plugin; the caller of this turns
+ * that into the response and goes on serving.
+ */
+function createTransformIndexHtml(root, plugin) {
+  const filename = resolve(root, "index.html");
+  return (html) => {
+    let produced;
+    try {
+      produced = (0, plugin.handler)(html, { path: "/index.html", filename });
+    } catch (error) {
+      // A Promise is a value a hook may throw as well as return, and either way this server was
+      // handed it. Its rejection is taken before the failure is reported, because a rejection
+      // nobody listened for ends the process after the response has already been written.
+      if (types.isPromise(error)) takeRejection(error);
+      configurationFailure(
+        `plugin ${plugin.name} failed to transform index.html: ${errorMessage(error)}`,
+      );
+    }
+    // Saying nothing, and saying nothing in particular, both leave the document as it was.
+    if (produced === undefined || produced === "") return html;
+    if (typeof produced === "string") return produced;
+    if (types.isPromise(produced)) takeRejection(produced);
+    configurationFailure(`plugin ${plugin.name} must return a string or undefined`);
+  };
+}
+
+/** One request's failure, said once, in the words the response carries. */
+function configurationFailure(message) {
+  throw new Error(message);
 }
 
 function configurationNamespaceImportUrl(url) {
@@ -193,6 +318,10 @@ export async function resolveStartOptions(argv) {
   return {
     root: options.root,
     port: options.port ?? configuration.port ?? DEFAULT_PORT,
+    transformIndexHtml:
+      configuration.plugin === undefined
+        ? undefined
+        : createTransformIndexHtml(options.root, configuration.plugin),
   };
 }
 
