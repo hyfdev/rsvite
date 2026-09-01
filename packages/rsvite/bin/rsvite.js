@@ -15,6 +15,7 @@ const DEFAULT_CONFIG_FILENAMES = [
   "vite.config.mts",
   "vite.config.cts",
 ];
+const nativePromiseThen = Object.getOwnPropertyDescriptor(Promise.prototype, "then").value;
 
 function usageError(message) {
   throw new Error(`${message}\nUsage: rsvite [root] [--port <port>]`);
@@ -64,6 +65,27 @@ function configurationError(message) {
   throw new Error(`invalid vite.config.js: ${message}`);
 }
 
+function errorMessage(error) {
+  try {
+    if (error !== null && (typeof error === "object" || typeof error === "function")) {
+      const message = error.message;
+      if (typeof message === "string") return message;
+    }
+    return String(error);
+  } catch {
+    return "error value cannot be converted to text";
+  }
+}
+
+function createConfigEnv() {
+  return {
+    command: "serve",
+    mode: "development",
+    isSsrBuild: false,
+    isPreview: false,
+  };
+}
+
 function isPlainObject(value) {
   if (value === null || typeof value !== "object") return false;
   const prototype = Object.getPrototypeOf(value);
@@ -88,18 +110,7 @@ function validateKeys(object, allowedKeys, location) {
   }
 }
 
-function observeExportedPromiseRejection(promise) {
-  void Promise.prototype.then.call(promise, undefined, () => {});
-}
-
 function validateConfiguration(value) {
-  if (typeof value === "function") {
-    configurationError("must default-export a plain object, not a function");
-  }
-  if (types.isPromise(value)) {
-    observeExportedPromiseRejection(value);
-    configurationError("must default-export a plain object, not a Promise");
-  }
   if (Array.isArray(value)) {
     configurationError("must default-export a plain object, not an array");
   }
@@ -123,6 +134,30 @@ function validateConfiguration(value) {
   return { port: port.value };
 }
 
+function configurationNamespaceImportUrl(url) {
+  const source = [
+    `import * as configuration from ${JSON.stringify(url)};`,
+    "export default { configuration };",
+    "",
+  ].join("\n");
+  return `data:text/javascript,${encodeURIComponent(source)}`;
+}
+
+function resolveConfigurationExport(value) {
+  const exportedValue = typeof value === "function" ? value(createConfigEnv()) : value;
+  if (!types.isPromise(exportedValue)) return { value: exportedValue };
+  return new Promise((resolveConfiguration, rejectConfiguration) => {
+    try {
+      void Reflect.apply(nativePromiseThen, exportedValue, [
+        (resolvedValue) => resolveConfiguration({ value: resolvedValue }),
+        rejectConfiguration,
+      ]);
+    } catch (error) {
+      rejectConfiguration(error);
+    }
+  });
+}
+
 async function loadConfiguration(root) {
   const filename = DEFAULT_CONFIG_FILENAMES.find((candidate) =>
     existsSync(resolve(root, candidate)),
@@ -132,15 +167,24 @@ async function loadConfiguration(root) {
     throw new Error(`${filename} is not supported in the current compatibility level`);
   }
 
+  if (!process.env.NODE_ENV) process.env.NODE_ENV = "development";
+
   let module;
   try {
-    module = await import(pathToFileURL(resolve(root, filename)).href);
+    const configurationUrl = pathToFileURL(resolve(root, filename)).href;
+    const wrapper = await import(configurationNamespaceImportUrl(configurationUrl));
+    module = wrapper.default.configuration;
   } catch (error) {
-    throw new Error(
-      `failed to load ${filename}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw new Error(`failed to load ${filename}: ${errorMessage(error)}`);
   }
-  return validateConfiguration(module.default);
+
+  let resolvedValue;
+  try {
+    ({ value: resolvedValue } = await resolveConfigurationExport(module.default));
+  } catch (error) {
+    throw new Error(`failed to evaluate ${filename}: ${errorMessage(error)}`);
+  }
+  return validateConfiguration(resolvedValue);
 }
 
 export async function resolveStartOptions(argv) {
